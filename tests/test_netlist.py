@@ -5,7 +5,16 @@ def test_version():
 
 
 def test_exprs():
-    from netlist import parse_expression, Int, Float, MetricNum, BinOp, Ident, Call
+    from netlist import (
+        parse_expression,
+        Int,
+        Float,
+        MetricNum,
+        UnOp,
+        BinOp,
+        Ident,
+        Call,
+    )
 
     p = parse_expression("1")
     assert p.root == Int(1)
@@ -57,6 +66,37 @@ def test_exprs():
         tp="PLUS",
         left=Ident(name="a"),
         right=Call(func=Ident(name="func"), args=[Ident(name="b"), Ident(name="c")]),
+    )
+
+    p = parse_expression(" - a ")  # Unary operator
+    assert p.root == UnOp(tp="MINUS", targ=Ident(name="a"))
+
+    p = parse_expression(" - + + - a ")  # Unary operator(s!)
+    assert p.root == UnOp(
+        tp="MINUS",
+        targ=UnOp(
+            tp="PLUS", targ=UnOp(tp="PLUS", targ=UnOp(tp="MINUS", targ=Ident(name="a")))
+        ),
+    )
+
+    p = parse_expression(" -5 * -3 ")  # Mixture of unary & binary ops
+    assert p.root == BinOp(
+        tp="STAR",
+        left=UnOp(tp="MINUS", targ=Int(val=5)),
+        right=UnOp(tp="MINUS", targ=Int(val=3)),
+    )
+
+    p = parse_expression(" 3 ** 4 * 2  ")  # Mixture of unary & binary ops
+    assert p.root == BinOp(
+        tp="STAR",
+        left=BinOp(tp="DUBSTAR", left=Int(val=3), right=Int(val=4)),
+        right=Int(val=2),
+    )
+    p = parse_expression(" 2 * 3 ** 4 ")  # Mixture of unary & binary ops
+    assert p.root == BinOp(
+        tp="STAR",
+        left=Int(val=2),
+        right=BinOp(tp="DUBSTAR", left=Int(val=3), right=Int(val=4)),
     )
 
 
