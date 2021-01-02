@@ -6,7 +6,7 @@
             "type": "python",
             "request": "launch",
             "module": "pytest",
-            "args": []
+            "args": ["tests/test_netlist.py"]
         }
     ]
 }

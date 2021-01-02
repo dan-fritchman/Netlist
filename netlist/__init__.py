@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 import re
 
-
+from pydantic import ValidationError
 from pydantic.dataclasses import dataclass
 from typing import Optional, Any, Dict, Union, List
 
@@ -57,7 +57,7 @@ class HierPath:
 
 @dataclass
 class ParamValue:
-    val: Union[int, float, str]
+    val: Union[int, float, str, "Expr"]
     unit: Optional[str] = None
 
 
@@ -177,7 +177,9 @@ class Entry:
 
 
 class NetlistParseError(Exception):
-    ...
+    @staticmethod
+    def throw():
+        raise NetlistParseError  # Break point here to catch all
 
 
 class Dialect:
@@ -249,8 +251,8 @@ class SpiceDialect(Dialect):
     PRIMITIVE_LEFT_RE = rf"([RrCcIiVvDdMmQq]{IDENT_CONT_RE}+\s+{EXPR_LIST_RE})"
     PRIMITIVE_RE = rf"({PRIMITIVE_LEFT_RE})\s+({PARAM_KWARGS_RE})?"
     # Module instances, in contrast, have the relative sanity of requiring all ports, and passing parameters by name
-    INST_LEFT_RE = f"[Xx]({IDENT_CONT_RE}+)\s+({NODE_NAME_RE}\s+)+({IDENT_RE})"  # Form `xname p1 p2 p3 modulename`
-    INSTANCE_RE = f"({INST_LEFT_RE})\s+({PARAM_KWARGS_RE})"  # Form `xname p1 p2 p3 modulename a=1 b=2 c=3`
+    INST_LEFT_RE = rf"[Xx]({IDENT_CONT_RE}+)\s+({NODE_NAME_RE}\s+)+({IDENT_RE})"  # Form `xname p1 p2 p3 modulename`
+    INSTANCE_RE = rf"({INST_LEFT_RE})\s+({PARAM_KWARGS_RE})"  # Form `xname p1 p2 p3 modulename a=1 b=2 c=3`
 
     @classmethod
     def parse_stmt(cls, line: str):
@@ -327,7 +329,9 @@ class SpiceDialect(Dialect):
     @classmethod
     def parse_param_values(cls, line: str) -> Dict[Ident, ParamValue]:
         return {
-            Ident(i.group(1)): ParamValue(i.group(2))
+            Ident(i.group(1).strip()): ParamValue(
+                parse_expression(i.group(2).strip()).root
+            )
             for i in re.compile(cls.PARAM_SET_RE).finditer(line)
         }
 
@@ -526,6 +530,7 @@ class SpectreDialect(SpectreMixin, Dialect):
             self.parse_subckt_start,
             self.parse_subckt_end,
             self.parse_instance,
+            self.parse_model_def,
             self.parse_stats,
         ]
         for rule in rules:
@@ -540,14 +545,24 @@ class SpectreDialect(SpectreMixin, Dialect):
         m = re.match("statistics", line, re.M)
         if m is None:
             return None
+        return StatisticsBlock(self.parse_bracketed(line))
 
+    def parse_model_def(self, line: str):
+        # FIXME: parsing as `Unknown`, bracketed text
+        m = re.match("model", line, re.M)
+        if m is None:
+            return None
+        return Unknown(self.parse_bracketed(line))
+
+    def parse_bracketed(self, line: str) -> str:
+        """ Parse multi-line bracketed text """
         txt = line[:]
         depth = txt.count("{") - txt.count("}")
         while depth > 0:
             nxt = self.parent.advance()
             txt += nxt[:]
             depth = txt.count("{") - txt.count("}")
-        return StatisticsBlock(txt)
+        return txt
 
     SUBCKT_LEFT_RE = rf"(inline\s+)?(subckt)\s+({IDENT_RE})\s+({PORT_CONN_RE})"
     SUBCKT_START_RE = rf"({SUBCKT_LEFT_RE})(\s+{PARAM_KWARGS_RE})?\s*$"
@@ -578,12 +593,14 @@ class SpectreDialect(SpectreMixin, Dialect):
         ident = None if not name else name
         return EndSubckt(Ident(ident))
 
-    PARAM_DECL_RE = rf"(parameters)\s+({PARAM_KWARGS_RE})\s*$"
+    PARAM_DECL_RE = rf"\s*parameters\s+"
 
     @classmethod
     def parse_param_decls(cls, line: str):
         m = re.match(cls.PARAM_DECL_RE, line, re.M)
         if m is None:
+            if line.lstrip().startswith("param"):
+                print(5)
             return None
         txt = line.lstrip().lstrip("parameters").lstrip()
         vals = cls.parse_param_values(txt)
@@ -599,7 +616,7 @@ class SpectreDialect(SpectreMixin, Dialect):
         m = re.match(cls.INSTANCE_RE, txt.lstrip(), re.M)
         if m is None:
             if txt.strip().startswith("c"):
-                print(5)
+                print(5)  # FIXME!
             return None
 
         # Split into left (instance, port names) and right (parameters) halves
@@ -635,7 +652,9 @@ class SpectreDialect(SpectreMixin, Dialect):
     @classmethod
     def parse_param_values(cls, line: str) -> Dict[Ident, ParamValue]:
         return {
-            Ident(i.group(1).strip()): ParamValue(i.group(2).strip())
+            Ident(i.group(1).strip()): ParamValue(
+                parse_expression(i.group(2).strip()).root
+            )
             for i in re.compile(cls.PARAM_SET_RE).finditer(line)
         }
 
@@ -665,10 +684,6 @@ class SpectreDialect(SpectreMixin, Dialect):
         names = [Ident(s) for s in names.split()]
         params = cls.parse_param_values(rest)
         return (names, params)
-
-    @classmethod
-    def parse_model_def(cls, line: str):
-        raise NotImplementedError
 
     @classmethod
     def parse_options(cls, line: str):
@@ -756,7 +771,7 @@ class Parser:
                         ),
                     )
                     entries.append(e)
-                except NetlistParseError as e:
+                except (NetlistParseError, ValidationError) as e:
                     raise NetlistParseError(
                         f"Netlist Parse Error in {self.path} Line {start_line_num}: {str(e)}"
                     )
@@ -807,23 +822,49 @@ def parse(path: os.PathLike, *, dialect=None) -> Parser:
     return p
 
 
+# Numeric-value suffixes
+suffixes = dict(
+    T=1.0e12,
+    G=1.0e9,
+    MEG=1.0e6,
+    X=1.0e6,
+    K=1.0e3,
+    M=1.0e-3,
+    MIL=2.54e-5,  # (1/1000 inch)
+    U=1.0e-6,
+    N=1.0e-9,
+    P=1.0e-12,
+    F=1.0e-15,
+    A=1.0e-18,
+)
+# Include both upper and lower-case versions. 
+# (Python `re` complains about inserting this as an inline flag.) 
+suffix_pattern = '|'.join(list(suffixes.keys()) + [k.lower() for k in suffixes.keys()])
+
+# Master mapping of tokens <=> patterns 
 tokens = dict(
-    FLOAT=r"(\d+[eE][+-]?\d+|(\d+\.\d*|\.\d+)([eE][+-]?\d+)?)", # 1e3 or 1.0 or .1 (optional e-3)
-    INT=r"[0-9][0-9]*",
+    METRIC_NUM=rf"(\d+(\.\d+)?|\.\d+)({suffix_pattern})", # 1M or 1.0f or .1k
+    FLOAT=r"(\d+[eE][+-]?\d+|(\d+\.\d*|\.\d+)([eE][+-]?\d+)?)",  # 1e3 or 1.0 or .1 (optional e-3)
+    INT=r"\d+",
     IDENT=r"[A-Za-z_][A-Za-z0-9_]*",
     LPAREN=r"\(",
     RPAREN=r"\)",
+    LBRACKET=r"\{",
+    RBRACKET=r"\}",
     WHITE=r"\s",
     NEWLINE=r"\n",
     PLUS=r"\+",
     MINUS=r"\-",
     SLASH=r"\/",
     STAR=r"\*",
+    TICK=r"\'",
 )
 # Given each token its name as a key in the overall regex
 tokens = {key: rf"(?P<{key}>{val})" for key, val in tokens.items()}
 # Build our overall regex pattern, a union of all
 pat = re.compile("|".join(tokens.values()))
+# Create an enum-ish class of these token-types
+Tokens = type("Tokens", (object,), {k: k for k in tokens.keys()})
 
 
 @dataclass
@@ -842,7 +883,12 @@ class Float:
     val: float
 
 
-Expr = Union["UnOp", "BinOp", Int, Float, Ident]
+@dataclass
+class MetricNum:
+    val: str  # No conversion, just stored as string for now
+
+
+Expr = Union["UnOp", "BinOp", Int, Float, MetricNum, Ident]
 
 
 @dataclass
@@ -863,24 +909,23 @@ class Lexer:
         self.txt = txt
         self.parser = None
 
-    def tokenize(self):
+    def lex(self):
+        """ Create an iterator over pattern-matches """
         sc = pat.scanner(self.txt)
-
-        for m in iter(sc.match, None):
+        for m in iter(sc.match, None):  # Iterate over token-matches
             token = Token(m.lastgroup, m.group())
-
-            if token.tp != "WHITE":
+            if token.tp != Tokens.WHITE:  # Filter out whitespace
                 yield token
 
 
 class ExpressionParser:
     def __init__(self, lex: Lexer):
         self.root = None
-        self.lex = lex
-        self.lex.parser = self
         self.cur = None
         self.nxt = None
-        self.tokens = self.lex.tokenize()
+        self.lex = lex
+        self.lex.parser = self
+        self.tokens = self.lex.lex()
 
     def advance(self):
         self.cur = self.nxt
@@ -894,53 +939,72 @@ class ExpressionParser:
         return False
 
     def expect(self, tp):
-        assert (self.nxt.tp == tp, NetlistParseError)
+        """ Assertion that our next token matches `tp`. 
+        Note this advances if successful, effectively discarding `self.cur`. """ 
+        if not self.match(tp):
+            NetlistParseError.throw()
 
     def parse(self):
         """ Perform parsing. Requires top-level be of type `Expr`. """
         self.advance()
         self.root = self.parse_expr()
+        #FIXME: check there's no more stuff!
 
     def parse_expr(self) -> Expr:
-        """ expr2 ( (*|/) expr2 )? """
+        """ expr0 | ' expr0 ' | { expr0 } """
+        # FIXME: the ticks vs brackets syntax will become a Dialect-specific thing 
+        if self.match(Tokens.TICK):
+            e = self.parse_expr0()
+            self.expect(Tokens.TICK)
+            return e
+        if self.match(Tokens.LBRACKET):
+            e = self.parse_expr0()
+            self.expect(Tokens.RBRACKET)
+            return e
+        return self.parse_expr0()
+
+    def parse_expr0(self) -> Expr:
+        """ expr1 ( (+|-) expr0 )? """
         e = self.parse_expr1()
-        if self.match("PLUS") or self.match("MINUS"):
+        if self.match(Tokens.PLUS) or self.match(Tokens.MINUS):
+            tp = self.cur.tp
+            return BinOp(tp=tp, left=e, right=self.parse_expr0())
+        return e
+
+    def parse_expr1(self) -> Expr:
+        """ expr2 ( (*|/) expr1 )? """
+        e = self.parse_expr2()
+        if self.match(Tokens.STAR) or self.match(Tokens.SLASH):
             tp = self.cur.tp
             return BinOp(tp=tp, left=e, right=self.parse_expr1())
         return e
 
-    def parse_expr1(self) -> Expr:
-        """ expr2 ( (*|/) expr2 )? """
-        e = self.parse_expr2()
-        if self.match("STAR") or self.match("SLASH"):
-            tp = self.cur.tp
-            return BinOp(tp=tp, left=e, right=self.parse_expr2())
-        return e
-
     def parse_expr2(self) -> Expr:
         """ ( expr ) or term """
-        if self.match("LPAREN"):
+        if self.match(Tokens.LPAREN):
             e = self.parse_expr()
-            self.expect("RPAREN")
+            self.expect(Tokens.RPAREN)
             return e
         return self.parse_term()
-    
+
     def parse_term(self) -> Union[Int, Float, Ident]:
         """ Parse a terminal value, or raise an Exception """
-        if self.match("FLOAT"):
+        if self.match(Tokens.METRIC_NUM):
+            return MetricNum(self.cur.val)
+        if self.match(Tokens.FLOAT):
             return Float(float(self.cur.val))
-        if self.match("INT"):
+        if self.match(Tokens.INT):
             return Int(int(self.cur.val))
-        if self.match("IDENT"):
+        if self.match(Tokens.IDENT):
             return Ident(self.cur.val)
-        raise NetlistParseError
+        NetlistParseError.throw()
 
 
 def parse_expression(s: str) -> ExpressionParser:
-    print(s)
     lex = Lexer(s)
-    [print(tok) for tok in lex.tokenize()]
+    # [print(tok) for tok in lex.lex()]
     parser = ExpressionParser(lex)
     parser.parse()
+    r = parser.root
     return parser
 
