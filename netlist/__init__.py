@@ -806,3 +806,141 @@ def parse(path: os.PathLike, *, dialect=None) -> Parser:
     p.parse(path)
     return p
 
+
+tokens = dict(
+    FLOAT=r"(\d+[eE][+-]?\d+|(\d+\.\d*|\.\d+)([eE][+-]?\d+)?)", # 1e3 or 1.0 or .1 (optional e-3)
+    INT=r"[0-9][0-9]*",
+    IDENT=r"[A-Za-z_][A-Za-z0-9_]*",
+    LPAREN=r"\(",
+    RPAREN=r"\)",
+    WHITE=r"\s",
+    NEWLINE=r"\n",
+    PLUS=r"\+",
+    MINUS=r"\-",
+    SLASH=r"\/",
+    STAR=r"\*",
+)
+# Given each token its name as a key in the overall regex
+tokens = {key: rf"(?P<{key}>{val})" for key, val in tokens.items()}
+# Build our overall regex pattern, a union of all
+pat = re.compile("|".join(tokens.values()))
+
+
+@dataclass
+class Token:
+    tp: str
+    val: Any
+
+
+@dataclass
+class Int:
+    val: int
+
+
+@dataclass
+class Float:
+    val: float
+
+
+Expr = Union["UnOp", "BinOp", Int, Float, Ident]
+
+
+@dataclass
+class UnOp:
+    tp: str
+    targ: Expr
+
+
+@dataclass
+class BinOp:
+    tp: str
+    left: Expr
+    right: Expr
+
+
+class Lexer:
+    def __init__(self, txt: str):
+        self.txt = txt
+        self.parser = None
+
+    def tokenize(self):
+        sc = pat.scanner(self.txt)
+
+        for m in iter(sc.match, None):
+            token = Token(m.lastgroup, m.group())
+
+            if token.tp != "WHITE":
+                yield token
+
+
+class ExpressionParser:
+    def __init__(self, lex: Lexer):
+        self.root = None
+        self.lex = lex
+        self.lex.parser = self
+        self.cur = None
+        self.nxt = None
+        self.tokens = self.lex.tokenize()
+
+    def advance(self):
+        self.cur = self.nxt
+        self.nxt = next(self.tokens, None)
+
+    def match(self, tp):
+        """ Boolean indication of whether our next token matches `tp` """
+        if self.nxt and tp == self.nxt.tp:
+            self.advance()
+            return True
+        return False
+
+    def expect(self, tp):
+        assert (self.nxt.tp == tp, NetlistParseError)
+
+    def parse(self):
+        """ Perform parsing. Requires top-level be of type `Expr`. """
+        self.advance()
+        self.root = self.parse_expr()
+
+    def parse_expr(self) -> Expr:
+        """ expr2 ( (*|/) expr2 )? """
+        e = self.parse_expr1()
+        if self.match("PLUS") or self.match("MINUS"):
+            tp = self.cur.tp
+            return BinOp(tp=tp, left=e, right=self.parse_expr1())
+        return e
+
+    def parse_expr1(self) -> Expr:
+        """ expr2 ( (*|/) expr2 )? """
+        e = self.parse_expr2()
+        if self.match("STAR") or self.match("SLASH"):
+            tp = self.cur.tp
+            return BinOp(tp=tp, left=e, right=self.parse_expr2())
+        return e
+
+    def parse_expr2(self) -> Expr:
+        """ ( expr ) or term """
+        if self.match("LPAREN"):
+            e = self.parse_expr()
+            self.expect("RPAREN")
+            return e
+        return self.parse_term()
+    
+    def parse_term(self) -> Union[Int, Float, Ident]:
+        """ Parse a terminal value, or raise an Exception """
+        if self.match("FLOAT"):
+            return Float(float(self.cur.val))
+        if self.match("INT"):
+            return Int(int(self.cur.val))
+        if self.match("IDENT"):
+            return Ident(self.cur.val)
+        raise NetlistParseError
+
+
+def parse_expression(s: str) -> ExpressionParser:
+    print(s)
+    lex = Lexer(s)
+    [print(tok) for tok in lex.tokenize()]
+    parser = ExpressionParser(lex)
+    parser.parse()
+    return parser
+
