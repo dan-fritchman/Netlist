@@ -5,7 +5,7 @@ def test_version():
 
 
 def test_exprs():
-    from netlist import parse_expression, Int, Float, MetricNum, BinOp, Ident
+    from netlist import parse_expression, Int, Float, MetricNum, BinOp, Ident, Call
 
     p = parse_expression("1")
     assert p.root == Int(1)
@@ -51,6 +51,13 @@ def test_exprs():
 
     p = parse_expression(" ' a + b ' ")  # SPICE-style ticked-expression
     assert p.root == BinOp(tp="PLUS", left=Ident(name="a"), right=Ident(name="b"))
+
+    p = parse_expression(" a + func(b, c) ")  # Function call
+    assert p.root == BinOp(
+        tp="PLUS",
+        left=Ident(name="a"),
+        right=Call(func=Ident(name="func"), args=[Ident(name="b"), Ident(name="c")]),
+    )
 
 
 def test_param_values():

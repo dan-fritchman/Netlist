@@ -28,7 +28,7 @@ def to_json(arg) -> str:
 from enum import Enum
 
 
-class SpiceDialects(Enum):
+class NetlistDialects(Enum):
     SPECTRE = 1
     SPECTRE_SPICE = 2
     SPICE = 3
@@ -40,7 +40,7 @@ class SpiceDialects(Enum):
 class SourceInfo:
     path: Path
     line: int
-    dialect: SpiceDialects
+    dialect: NetlistDialects
 
 
 @dataclass(eq=True, frozen=True)
@@ -178,22 +178,23 @@ class Entry:
 
 class NetlistParseError(Exception):
     @staticmethod
-    def throw():
-        raise NetlistParseError  # Break point here to catch all
+    def throw(*args, **kwargs):
+        """ Exception-raising debug wrapper. Breakpoint to catch `NetlistParseError`s. """
+        raise NetlistParseError(*args, **kwargs)
 
 
 class Dialect:
     @classmethod
-    def from_enum(cls, dialect: Optional["SpiceDialects"] = None):
-        """ Return a Dialect sub-class based on the `SpiceDialects` enum. 
+    def from_enum(cls, dialect: Optional["NetlistDialects"] = None):
+        """ Return a Dialect sub-class based on the `NetlistDialects` enum. 
         Returns the default class if argument `dialect` is not provided or `None`. """
         if dialect is None:
             return SpectreDialect
-        if dialect == SpiceDialects.SPECTRE:
+        if dialect == NetlistDialects.SPECTRE:
             return SpectreDialect
-        if dialect == SpiceDialects.SPECTRE_SPICE:
+        if dialect == NetlistDialects.SPECTRE_SPICE:
             return SpectreSpiceDialect
-        if dialect == SpiceDialects.NGSPICE:
+        if dialect == NetlistDialects.NGSPICE:
             return NgSpiceDialect
         raise ValueError
 
@@ -293,14 +294,14 @@ class SpiceDialect(Dialect):
             return cls.parse_dot_lib(line)
         if lc.startswith(".model"):
             return cls.parse_model_def(line)
-        raise NetlistParseError(f"Invalid Statement: {line}")
+        NetlistParseError.throw(f"Invalid Statement: {line}")
 
     @classmethod
     def parse_instance(cls, txt: str):
         """ Parse a Subckt/Module Instance """
         m = re.match(re.compile(cls.INST_LEFT_RE), txt)
         if m is None:
-            raise NetlistParseError
+            NetlistParseError.throw()
 
         names = m.group(1)
         rest = txt.replace(names, "")
@@ -341,7 +342,7 @@ class SpiceDialect(Dialect):
     ) -> (List[ParamValue], Dict[Ident, ParamValue]):
         m = re.match(re.compile(cls.PARAMS_ARG_AND_KWARG_RE), txt)
         if m is None:
-            raise NetlistParseError
+            NetlistParseError.throw()
         exprs = m.group(1)
         rest = txt.replace(exprs, "")
         exprs = [ParamValue(s) for s in exprs.split()]
@@ -355,7 +356,7 @@ class SpiceDialect(Dialect):
         """ Parsers (fairly common) strings of the form `xabc a b c mymodel d=1 e=2 f=3.9e19 """
         m = re.match(re.compile(cls.IDENTS_AND_PARAMS_RE), txt)
         if m is None:
-            raise NetlistParseError
+            NetlistParseError.throw()
         names = m.group(1)
         rest = txt.replace(names, "")
         names = [Ident(s) for s in names.split()]
@@ -408,12 +409,12 @@ class SpiceDialect(Dialect):
         """ Parse a line beginning with `.lib`, which may be *defining* or *using* the library! """
         parts = line.split()
         if parts[0].lower() != ".lib":
-            raise NetlistParseError
+            NetlistParseError.throw()
         if len(parts) == 2:
             return StartLib(Ident(parts[1]))
         elif len(parts) == 3:
             return UseLib(path=Path(parts[1], section=Ident(parts[2])))
-        raise NetlistParseError
+        NetlistParseError.throw()
 
     @classmethod
     def parse_inc(cls, line: str):
@@ -422,12 +423,12 @@ class SpiceDialect(Dialect):
             if txt.endswith('"'):
                 return Include(Path(txt[1:-1]))
             else:
-                raise NetlistParseError("Unclosed String")
+                NetlistParseError.throw("Unclosed String")
         if txt.startswith("'"):
             if txt.endswith("'"):
                 return Include(Path(txt[1:-1]))
             else:
-                raise NetlistParseError("Unclosed String")
+                NetlistParseError.throw("Unclosed String")
         return Include(Path(txt))
 
     @classmethod
@@ -437,7 +438,7 @@ class SpiceDialect(Dialect):
 
 class NgSpiceDialect(SpiceDialect):
     # FIXME: actually specialize!
-    enum = SpiceDialects.NGSPICE
+    enum = NetlistDialects.NGSPICE
 
 
 class SpectreMixin:
@@ -472,7 +473,7 @@ class SpectreMixin:
 class SpectreSpiceDialect(SpectreMixin, SpiceDialect):
     """ Spice-Style Syntax, as Interpreted by Spectre """
 
-    enum = SpiceDialects.SPECTRE_SPICE
+    enum = NetlistDialects.SPECTRE_SPICE
 
     def parse_stmt(self, line: str):
         """ Inject a few rules specific to Spectre-Spice """
@@ -489,7 +490,7 @@ class SpectreDialect(SpectreMixin, Dialect):
     """ Spectre-Language Dialect. 
     Probably more of a separate language really, but it fits our Dialect paradigm well enough. """
 
-    enum = SpiceDialects.SPECTRE
+    enum = NetlistDialects.SPECTRE
 
     HIER_PATH_SEP = "."
     CONTINUATION_CHAR = "+"
@@ -699,7 +700,7 @@ class SpectreDialect(SpectreMixin, Dialect):
 
 
 class Parser:
-    def __init__(self, dialect: Optional[SpiceDialects] = None):
+    def __init__(self, dialect: Optional[NetlistDialects] = None):
         self.dialect = Dialect.from_enum(dialect)(self)
         self.deps: List[Path] = []
         self.entries: List[Entry] = []
@@ -707,7 +708,7 @@ class Parser:
         self.line_num = 1
 
     @classmethod
-    def default_dialect(cls, path: os.PathLike) -> "SpiceDialects":
+    def default_dialect(cls, path: os.PathLike) -> "NetlistDialects":
         """ Infer a default dialect from a file name, particularly its suffix. 
         For files of suffix `scs` this is straightforwardly set to SPECTRE. 
         All other suffixes are less clear without knowing more context. 
@@ -717,8 +718,8 @@ class Parser:
         if not p.exists() or not p.is_file():
             raise FileNotFoundError(p)
         if p.suffix == "scs":
-            return SpiceDialects.SPECTRE
-        return SpiceDialects.SPECTRE_SPICE
+            return NetlistDialects.SPECTRE
+        return NetlistDialects.SPECTRE_SPICE
 
     def notify(self, reason: DialectChange):
         """ Notification from dialect-parser that something's up. 
@@ -726,9 +727,9 @@ class Parser:
 
         s = reason.dialect.lower().strip()
         if s == "spectre":
-            dialect = SpiceDialects.SPECTRE
+            dialect = NetlistDialects.SPECTRE
         elif s == "spice":
-            dialect = SpiceDialects.SPECTRE_SPICE
+            dialect = NetlistDialects.SPECTRE_SPICE
         else:
             raise NetlistParseError
         self.dialect = Dialect.from_enum(dialect)(self)
@@ -772,8 +773,8 @@ class Parser:
                     )
                     entries.append(e)
                 except (NetlistParseError, ValidationError) as e:
-                    raise NetlistParseError(
-                        f"Netlist Parse Error in {self.path} Line {start_line_num}: {str(e)}"
+                    NetlistParseError.throw(
+                        f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{line} "
                     )
 
             # Move to the next statement
@@ -811,7 +812,7 @@ class Parser:
                 self.parse(incp)
             if isinstance(s, UseLib):
                 # Not supported, yet
-                raise NetlistParseError
+                NetlistParseError.throw()
 
 
 def parse(path: os.PathLike, *, dialect=None) -> Parser:
@@ -837,13 +838,13 @@ suffixes = dict(
     F=1.0e-15,
     A=1.0e-18,
 )
-# Include both upper and lower-case versions. 
-# (Python `re` complains about inserting this as an inline flag.) 
-suffix_pattern = '|'.join(list(suffixes.keys()) + [k.lower() for k in suffixes.keys()])
+# Include both upper and lower-case versions.
+# (Python `re` complains about inserting this as an inline flag.)
+suffix_pattern = "|".join(list(suffixes.keys()) + [k.lower() for k in suffixes.keys()])
 
-# Master mapping of tokens <=> patterns 
+# Master mapping of tokens <=> patterns
 tokens = dict(
-    METRIC_NUM=rf"(\d+(\.\d+)?|\.\d+)({suffix_pattern})", # 1M or 1.0f or .1k
+    METRIC_NUM=rf"(\d+(\.\d+)?|\.\d+)({suffix_pattern})",  # 1M or 1.0f or .1k
     FLOAT=r"(\d+[eE][+-]?\d+|(\d+\.\d*|\.\d+)([eE][+-]?\d+)?)",  # 1e3 or 1.0 or .1 (optional e-3)
     INT=r"\d+",
     IDENT=r"[A-Za-z_][A-Za-z0-9_]*",
@@ -858,6 +859,7 @@ tokens = dict(
     SLASH=r"\/",
     STAR=r"\*",
     TICK=r"\'",
+    COMMA=r"\,",
 )
 # Given each token its name as a key in the overall regex
 tokens = {key: rf"(?P<{key}>{val})" for key, val in tokens.items()}
@@ -888,7 +890,26 @@ class MetricNum:
     val: str  # No conversion, just stored as string for now
 
 
-Expr = Union["UnOp", "BinOp", Int, Float, MetricNum, Ident]
+@dataclass
+class Call:
+    """ Function Call Node 
+    All valid parameter-generating function calls return a single value, 
+    usable in a mathematical expression (`Expr`) context. 
+    All arguments are provided by position and stored in a List. 
+    All arguments must also be resolvable as mathematical expressions. 
+    Function-names are left as identifiers (`Ident`). 
+    No checking is performed as to their availability, 
+    nor are they checked for membership of any keyword-list. 
+    
+    Examples:
+    `sqrt(2)` => Call(func=Ident("sqrt"), args=([Int(2)]),)
+    """
+
+    func: Ident  # Function Name
+    args: List["Expr"]  # Arguments List
+
+
+Expr = Union["UnOp", "BinOp", Int, Float, MetricNum, Ident, Call]
 
 
 @dataclass
@@ -902,6 +923,9 @@ class BinOp:
     tp: str
     left: Expr
     right: Expr
+
+
+Call.__pydantic_model__.update_forward_refs()
 
 
 class Lexer:
@@ -940,19 +964,21 @@ class ExpressionParser:
 
     def expect(self, tp):
         """ Assertion that our next token matches `tp`. 
-        Note this advances if successful, effectively discarding `self.cur`. """ 
+        Note this advances if successful, effectively discarding `self.cur`. """
         if not self.match(tp):
             NetlistParseError.throw()
 
-    def parse(self):
+    def parse(self) -> Expr:
         """ Perform parsing. Requires top-level be of type `Expr`. """
         self.advance()
         self.root = self.parse_expr()
-        #FIXME: check there's no more stuff!
+        if self.nxt is not None:  # Check there's no more stuff
+            NetlistParseError.throw()
+        return self.root
 
     def parse_expr(self) -> Expr:
-        """ expr0 | ' expr0 ' | { expr0 } """
-        # FIXME: the ticks vs brackets syntax will become a Dialect-specific thing 
+        """ expr0 | 'expr0' | {expr0} """
+        # FIXME: the ticks vs brackets syntax will become a Dialect-specific thing
         if self.match(Tokens.TICK):
             e = self.parse_expr0()
             self.expect(Tokens.TICK)
@@ -988,7 +1014,8 @@ class ExpressionParser:
         return self.parse_term()
 
     def parse_term(self) -> Union[Int, Float, Ident]:
-        """ Parse a terminal value, or raise an Exception """
+        """ Parse a terminal value, or raise an Exception 
+        ( number | ident | call ) """
         if self.match(Tokens.METRIC_NUM):
             return MetricNum(self.cur.val)
         if self.match(Tokens.FLOAT):
@@ -996,7 +1023,23 @@ class ExpressionParser:
         if self.match(Tokens.INT):
             return Int(int(self.cur.val))
         if self.match(Tokens.IDENT):
-            return Ident(self.cur.val)
+            name = Ident(self.cur.val)
+            if self.match(Tokens.LPAREN):  # Function-call syntax
+                # Parse arguments
+                args = []
+                MAX_ARGS = 100  # Set a "time-out" so that we don't get stuck here.
+                for i in range(MAX_ARGS, -1, -1):
+                    if self.match(Tokens.RPAREN):
+                        break
+                    a = self.parse_expr0()  # Grab an argument-expression
+                    args.append(a)
+                    if self.match(Tokens.RPAREN):
+                        break
+                    self.expect(Tokens.COMMA)
+                if i <= 0:  # Check the time-out
+                    NetlistParseError.throw()
+                return Call(func=name, args=args)
+            return name
         NetlistParseError.throw()
 
 
