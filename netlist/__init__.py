@@ -13,7 +13,7 @@ import re
 
 from pydantic import ValidationError
 from pydantic.dataclasses import dataclass
-from typing import Optional, Any, Dict, Union, List
+from typing import Optional, Any, Dict, Union, List, Tuple
 
 
 def to_json(arg) -> str:
@@ -55,10 +55,17 @@ class HierPath:
     path: List[Ident]
 
 
-@dataclass
-class ParamValue:
-    val: Union[int, float, str, "Expr"]
+@dataclass(eq=True, frozen=True)
+class ParamDecl:
+    name: Ident
+    default: "Expr"
     unit: Optional[str] = None
+    distr: Optional[str] = None
+
+
+@dataclass(eq=True, frozen=True)
+class ParamDecls:
+    params: List[ParamDecl]
 
 
 @dataclass
@@ -67,8 +74,8 @@ class Instance:
 
     name: Ident
     module: Ident
-    conns: Union[List[Ident], Dict[Ident, Ident]]
-    params: Dict[Ident, Optional[ParamValue]]
+    conns: Union[List[Ident], List[Tuple[Ident, Ident]]]
+    params: ParamDecls  # FIXME: will be just List[(Ident, "Expr")], without the parameter declaration annotations
 
 
 @dataclass
@@ -79,27 +86,20 @@ class Primitive:
     Primitives instead store positional and keyword arguments `args` and `kwargs`. """
 
     name: Ident
-    args: List[ParamValue]
-    kwargs: Dict[Ident, Optional[ParamValue]]
-
-
-@dataclass
-class ParamDecls:
-    """ Parameter Declarations (One or More, in Dict form) """
-
-    vals: Dict[Ident, Optional[ParamValue]]
+    args: List["Expr"]
+    kwargs: ParamDecls
 
 
 @dataclass
 class Options:
-    vals: Dict[Ident, Optional[ParamValue]]
+    vals: ParamDecls
 
 
 @dataclass
 class StartSubckt:
     name: Ident
     ports: List[Ident]
-    params: Dict[Ident, Optional[ParamValue]]
+    params: ParamDecls
 
 
 @dataclass
@@ -111,7 +111,7 @@ class EndSubckt:
 class ModelDef:
     name: HierPath  # FIXME: may need to be specialized
     args: List[Ident]
-    params: Dict[Ident, Optional[ParamValue]]
+    params: ParamDecls
 
 
 @dataclass
@@ -332,16 +332,14 @@ class SpiceDialect(Dialect):
         kwargs = self.parse_param_values(rest)
         exprs = exprs.split()
         name = Ident(exprs.pop(0))
-        args = [ParamValue(s) for s in exprs]
+        args = [parse_expression(s).root for s in exprs]
         return Primitive(name, args, kwargs)
 
-    def parse_param_values(self, line: str) -> Dict[Ident, ParamValue]:
+    def parse_param_values(self, line: str) -> ParamDecls:
         p = ExpressionParser(line)
-        return p.parse(f=p.parse_param_declarations) 
+        return p.parse(f=p.parse_param_declarations)
 
-    def parse_idents_and_params(
-        self, txt: str
-    ) -> (List[Ident], Dict[Ident, ParamValue]):
+    def parse_idents_and_params(self, txt: str) -> (List[Ident], ParamDecls):
         """ Parsers (fairly common) strings of the form `xabc a b c mymodel d=1 e=2 f=3.9e19 """
         m = re.match(re.compile(self.IDENTS_AND_PARAMS_RE), txt)
         if m is None:
@@ -382,8 +380,7 @@ class SpiceDialect(Dialect):
 
     def parse_param_decls(self, line: str):
         txt = line.lower().replace(".param", "")
-        vals = self.parse_param_values(txt)
-        return ParamDecls(vals)
+        return self.parse_param_values(txt)
 
     def parse_options(self, line: str):
         txt = line.lower().replace(".option", "")
@@ -583,8 +580,7 @@ class SpectreDialect(SpectreMixin, Dialect):
                 print(5)
             return None
         txt = line.lstrip().lstrip("parameters").lstrip()
-        vals = self.parse_param_values(txt)
-        return ParamDecls(vals)
+        return self.parse_param_values(txt)
 
     # Instance expressions
     INST_LEFT_RE = rf"({IDENT_RE})\s+({PORT_CONN_RE})\s+({IDENT_RE})"
@@ -614,13 +610,11 @@ class SpectreDialect(SpectreMixin, Dialect):
         conns = [Ident(s) for s in ml.group(2).split()]
         return Instance(name, module, conns, params)
 
-    def parse_param_values(self, line: str) -> Dict[Ident, ParamValue]:
+    def parse_param_values(self, line: str) -> ParamDecls:
         p = ExpressionParser(line)
-        return p.parse(f=p.parse_param_declarations) 
+        return p.parse(f=p.parse_param_declarations)
 
-    def parse_idents_and_params(
-        self, txt: str
-    ) -> (List[Ident], Dict[Ident, ParamValue]):
+    def parse_idents_and_params(self, txt: str) -> (List[Ident], ParamDecls):
         """ Parses (fairly common) strings of the form `xabc a b c mymodel d=1 e=2 f=3.9e19 """
         m = re.match(re.compile(self.IDENTS_AND_PARAMS_RE), txt)
         if m is None:
@@ -874,8 +868,10 @@ class BinOp:
     left: Expr
     right: Expr
 
-
+# Update all the forward-type-references 
 Call.__pydantic_model__.update_forward_refs()
+Primitive.__pydantic_model__.update_forward_refs()
+ParamDecl.__pydantic_model__.update_forward_refs()
 
 
 class Lexer:
@@ -935,12 +931,11 @@ class ExpressionParser:
             NetlistParseError.throw()
         return self.root
 
-    def parse_param_declarations(self) -> dict:
+    def parse_param_declarations(self) -> ParamDecls:
         """ ( ident = exprt ( dev/gauss = expr )? ( $ units/commentary )? )* """
-        dct = {}
-        MAX_ARGS = (
-            1000  # Set a (fairly artificial) "time-out" so we don't get stuck here
-        )
+        rv = []
+        # Set a (fairly artificial) "time-out" so we don't get stuck here
+        MAX_ARGS = 1000
         for i in range(MAX_ARGS, -1, -1):
             if self.nxt is None:
                 break
@@ -954,11 +949,11 @@ class ExpressionParser:
                 # FIXME: Skipping this auxiliary stuff for now
                 while self.nxt and not self.match(Tokens.NEWLINE):
                     self.advance()
-            dct[name] = ParamValue(e)
+            rv.append(ParamDecl(name, e))
 
         if i <= 0:  # Check whether the time-out triggered
             NetlistParseError.throw()
-        return dct
+        return ParamDecls(rv)
 
     def parse_expr(self) -> Expr:
         """ expr0 | 'expr0' | {expr0} """

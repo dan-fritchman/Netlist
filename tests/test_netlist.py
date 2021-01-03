@@ -101,8 +101,10 @@ def test_exprs():
 
 
 def test_param_values():
-    from netlist import ParamValue, Float, Expr, BinOp
+    from netlist import Ident, ParamDecl, Float, Expr, BinOp
 
-    p = ParamValue(Float(5))
-    p = ParamValue(BinOp("PLUS", Float(1e-3), BinOp("STAR", Float(2.0), Float(0.3))))
+    p = ParamDecl(Ident("a"), Float(5))
+    p = ParamDecl(
+        Ident("b"), BinOp("PLUS", Float(1e-3), BinOp("STAR", Float(2.0), Float(0.3)))
+    )
 
