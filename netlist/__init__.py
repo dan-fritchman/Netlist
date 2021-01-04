@@ -214,6 +214,17 @@ class Dialect:
     def is_comment(cls, s: str) -> bool:
         return s.startswith(cls.COMMENT_CHAR)
 
+    INSTANCE_RE = None
+
+    def parse_instance(self, txt: str) -> Optional[Instance]:
+        """ Parse a Subckt/Module Instance """
+        m = re.match(self.INSTANCE_RE, txt.lstrip(), re.M)
+        if m is None:
+            return None
+
+        p = LineParser(txt, self)
+        return p.parse(f=p.parse_instance)
+
 
 class SpiceDialect(Dialect):
     """ Family of SPICE-like syntax dialects, complete with 
@@ -259,20 +270,16 @@ class SpiceDialect(Dialect):
 
         # In-progress porting to `Optional[Statement]` return type,
         # Where `None` indicates no-match
-        new_fangled_rules = [self.parse_primitive, self.parse_instance]
-        for rule in new_fangled_rules:
+        rules = [
+            self.parse_primitive,
+            self.parse_instance,
+            self.parse_subckt_start,
+            self.parse_subckt_end,
+        ]
+        for rule in rules:
             s = rule(line)
             if s is not None:
                 return s
-
-        # Dictionary of rules, in priority-order
-        rules = {
-            self.SUBCKT_START_RE: self.parse_subckt_start,
-            self.SUBCKT_END_RE: self.parse_subckt_end,
-        }
-        for pattern, func in rules.items():
-            if re.match(re.compile(pattern), line):
-                return func(line)
 
         # More-manual, even-older-school rules
         lc = line.lower()
@@ -288,39 +295,10 @@ class SpiceDialect(Dialect):
             return self.parse_model_def(line)
         NetlistParseError.throw(f"Invalid Statement: {line}")
 
-    # Instance expressions
-    NODE_LIST_RE = rf"({NODE_NAME_RE})(\s+{NODE_NAME_RE})*"
-    PORT_CONN_RE = rf"({NODE_LIST_RE}|\(\s*{NODE_LIST_RE}\s*\))"  # Optionally paren-surrounded node-list, e.g. `d g s b`, `(d g s b)`
-
-    INST_LEFT_RE = rf"([Xx]{IDENT_RE})\s+({PORT_CONN_RE})\s+({IDENT_RE})"
-    INSTANCE_RE = rf"({INST_LEFT_RE})(\s+{PARAM_KWARGS_RE})?\s*$"
-
     PRIMITIVE_LEFT_RE = rf"([RrCcIiVvDdMmQq]{IDENT_CONT_RE}+\s+{EXPR_LIST_RE})"
     PRIMITIVE_RE = rf"({PRIMITIVE_LEFT_RE})(\s+{PARAM_KWARGS_RE})?\s*$"
 
-    def parse_instance(self, txt: str) -> Optional[Instance]:
-        """ Parse a Subckt/Module Instance """
-        m = re.match(self.INSTANCE_RE, txt.lstrip(), re.M)
-        if m is None:
-            if txt.strip().startswith("c"):
-                print(5)  # FIXME!
-            return None
-
-        # Split into left (instance, port names) and right (parameters) halves
-        left = m.group(1)
-        rest = txt.replace(left, "")
-
-        # Parse the right-half parameters
-        params = self.parse_param_values(rest)
-
-        # Now parse the left-half into instance name, ports, and module name
-        ml = re.match(self.INST_LEFT_RE, left)
-        if ml is None:
-            raise NetlistParseError
-        name = Ident(ml.group(1).strip())
-        module = Ident(ml.group(3).strip())
-        conns = [Ident(s) for s in ml.group(2).split()]
-        return Instance(name, module, conns, params)
+    INSTANCE_RE = rf"[Xx]{IDENT_CONT_RE}+"
 
     def parse_primitive(self, txt: str) -> Optional[Primitive]:
         """ Parse a Primitive Instance """
@@ -336,7 +314,7 @@ class SpiceDialect(Dialect):
         return Primitive(name, args, kwargs)
 
     def parse_param_values(self, line: str) -> ParamDecls:
-        p = ExpressionParser(line)
+        p = LineParser(line, self)
         return p.parse(f=p.parse_param_declarations)
 
     def parse_idents_and_params(self, txt: str) -> (List[Ident], ParamDecls):
@@ -352,11 +330,19 @@ class SpiceDialect(Dialect):
 
     @classmethod
     def parse_subckt_end(cls, txt: str) -> EndSubckt:
+        m = re.match(r"\.ends|\.ENDS", txt)
+        if m is None:
+            return None
+
         name = txt.replace(".ends", "").replace(".ENDS", "").strip()
         ident = None if not name else name
         return EndSubckt(Ident(ident))
 
-    def parse_subckt_start(self, line: str):
+    def parse_subckt_start(self, line: str) -> Optional[StartSubckt]:
+        m = re.match(r"\.subckt|\.SUBCKT", line)
+        if m is None:
+            return None
+
         txt = line.replace(".subckt", "").replace(".SUBCKT", "")
         names, params = self.parse_idents_and_params(txt)
         name = names[0]
@@ -509,9 +495,9 @@ class SpectreDialect(SpectreMixin, Dialect):
             self.parse_param_decls,
             self.parse_subckt_start,
             self.parse_subckt_end,
-            self.parse_instance,
             self.parse_model_def,
             self.parse_stats,
+            self.parse_instance,
         ]
         for rule in rules:
             stmt = rule(line)
@@ -576,8 +562,6 @@ class SpectreDialect(SpectreMixin, Dialect):
     def parse_param_decls(self, line: str):
         m = re.match(self.PARAM_DECL_RE, line, re.M)
         if m is None:
-            if line.lstrip().startswith("param"):
-                print(5)
             return None
         txt = line.lstrip().lstrip("parameters").lstrip()
         return self.parse_param_values(txt)
@@ -586,32 +570,8 @@ class SpectreDialect(SpectreMixin, Dialect):
     INST_LEFT_RE = rf"({IDENT_RE})\s+({PORT_CONN_RE})\s+({IDENT_RE})"
     INSTANCE_RE = rf"({INST_LEFT_RE})\s+({PARAM_KWARGS_RE})\s*$"
 
-    def parse_instance(self, txt: str) -> Optional[Instance]:
-        """ Parse a Subckt/Module Instance """
-        m = re.match(self.INSTANCE_RE, txt.lstrip(), re.M)
-        if m is None:
-            if txt.strip().startswith("c"):
-                print(5)  # FIXME!
-            return None
-
-        # Split into left (instance, port names) and right (parameters) halves
-        left = m.group(1)
-        rest = txt.replace(left, "")
-
-        # Parse the right-half parameters
-        params = self.parse_param_values(rest)
-
-        # Now parse the left-half into instance name, ports, and module name
-        ml = re.match(self.INST_LEFT_RE, left)
-        if ml is None:
-            raise NetlistParseError
-        name = Ident(ml.group(1).strip())
-        module = Ident(ml.group(3).strip())
-        conns = [Ident(s) for s in ml.group(2).split()]
-        return Instance(name, module, conns, params)
-
     def parse_param_values(self, line: str) -> ParamDecls:
-        p = ExpressionParser(line)
+        p = LineParser(line, self)
         return p.parse(f=p.parse_param_declarations)
 
     def parse_idents_and_params(self, txt: str) -> (List[Ident], ParamDecls):
@@ -868,7 +828,8 @@ class BinOp:
     left: Expr
     right: Expr
 
-# Update all the forward-type-references 
+
+# Update all the forward-type-references
 Call.__pydantic_model__.update_forward_refs()
 Primitive.__pydantic_model__.update_forward_refs()
 ParamDecl.__pydantic_model__.update_forward_refs()
@@ -888,48 +849,101 @@ class Lexer:
                 yield token
 
 
-class ExpressionParser:
-    def __init__(self, s: str):
+class LineParser:
+    def __init__(self, s: str, dialect: Optional[SpiceDialect] = None):
+        self.dialect = dialect or Dialect.from_enum(NetlistDialects.SPECTRE_SPICE)
         self.root = None
+        # Initialize our state
         self.cur = None
-        self.nxt = None
+        self.nxt = None  # It is (was) LL(1)
+        self.nxt1 = None  # OK, it's LL(2)
+        # Initialize our lexer and its token-generator
         self.lex = Lexer(s)
         self.lex.parser = self
         self.tokens = self.lex.lex()
 
-    def advance(self):
-        self.cur = self.nxt
-        self.nxt = next(self.tokens, None)
+    def start(self) -> None:
+        # Queue up our lookahead tokens
+        self.advance()
+        self.advance()
 
-    def match(self, tp: str):
+    def advance(self) -> None:
+        self.cur = self.nxt
+        self.nxt = self.nxt1
+        self.nxt1 = next(self.tokens, None)
+
+    def match(self, tp: str) -> bool:
         """ Boolean indication of whether our next token matches `tp` """
         if self.nxt and tp == self.nxt.tp:
             self.advance()
             return True
         return False
 
-    def match_any(self, *tp: List[str]):
-        """ Boolean indication of whether our next token matches `tp` """
+    def match_any(self, *tp: List[str]) -> bool:
+        """ Boolean indication of whether our next token matche *any* provided `tp` """
         if self.nxt and any([self.nxt.tp == t for t in tp]):
             self.advance()
             return True
         return False
 
-    def expect(self, tp: str):
+    def expect(self, *tp: List[str]) -> None:
         """ Assertion that our next token matches `tp`. 
         Note this advances if successful, effectively discarding `self.cur`. """
-        if not self.match(tp):
+        if not self.match_any(*tp):
             NetlistParseError.throw()
 
-    def parse(self, f=None) -> Expr:
+    def parse(self, f=None) -> Any:
         """ Perform parsing. Succeeds if top-level is parsable by function `f`.
         Defaults to parsing `Expr`. """
+        self.start()
         func = f if f else self.parse_expr
-        self.advance()
         self.root = func()
         if self.nxt is not None:  # Check whether there's more stuff
             NetlistParseError.throw()
         return self.root
+
+    def parse_instance(self) -> Instance:
+        """ iname (? port1 port2 port2 )? mname p1=param1 p2=param2 ... """
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        conns = []
+
+        # Parse the parens-optional port-list
+        if self.match(Tokens.LPAREN):
+            MAX_PORTS = 10_000  # "Time-out"
+            for i in range(MAX_PORTS, -1, -1):
+                if not self.nxt or self.match(Tokens.RPAREN):
+                    break
+                self.expect(Tokens.IDENT, Tokens.INT)
+                name = Ident(
+                    str(self.cur.val)
+                )  # Note integer-valued node-names are stored as Ident(str)
+                conns.append(name)
+            if i <= 0:  # Check whether the time-out triggered
+                NetlistParseError.throw()
+            # Grab the module name
+            self.expect(Tokens.IDENT)
+            module = Ident(self.cur.val)
+
+        else:  # No-parens case
+            MAX_PORTS = 10_000  # "Time-out"
+            for i in range(MAX_PORTS, -1, -1):
+                if not self.nxt or not self.nxt1 or self.nxt1.tp == Tokens.EQUALS:
+                    break
+                self.expect(Tokens.IDENT, Tokens.INT)
+                name = Ident(
+                    str(self.cur.val)
+                )  # Note integer-valued node-names are stored as Ident(str)
+                conns.append(name)
+            if i <= 0:  # Check whether the time-out triggered
+                NetlistParseError.throw()
+            # Grab the module name, at this point errantly in the `conns` list
+            module = conns.pop()  # FIXME: check this matched `Ident` and not `Int`
+
+        # Parse parameters
+        params = self.parse_param_declarations()
+        # And create & return our instance
+        return Instance(name=name, module=module, conns=conns, params=params)
 
     def parse_param_declarations(self) -> ParamDecls:
         """ ( ident = exprt ( dev/gauss = expr )? ( $ units/commentary )? )* """
@@ -1029,8 +1043,8 @@ class ExpressionParser:
         NetlistParseError.throw()
 
 
-def parse_expression(s: str) -> ExpressionParser:
-    parser = ExpressionParser(s)
+def parse_expression(s: str) -> LineParser:
+    parser = LineParser(s)
     parser.parse()
     return parser
 
