@@ -55,18 +55,18 @@ class Parser:
 
         while self.line:
             # Iterate over multi-line statements
-            line = self.line[:]  # Copies
+            lines = [self.line.lstrip()]
 
             while self.dialect.is_continuation(self.nxt):
                 if not self.dialect.is_comment(self.nxt):
-                    line += self.nxt.lstrip()[1:]
+                    lines.append(self.nxt.lstrip())
                 if not self.nxt:
                     break  # Break on end-of-file
                 self.advance()
 
-            if line.strip():  # Filter out empties
+            if any(line.strip() for line in lines):  # Filter out empties
                 try:  # Collected a statement, parse it
-                    s = self.dialect.parse_stmt(line.lstrip())
+                    s = self.dialect.parse_stmt(lines)
                     e = Entry(
                         content=s,
                         source_info=SourceInfo(
@@ -78,7 +78,7 @@ class Parser:
                     entries.append(e)
                 except (NetlistParseError, ValidationError) as e:
                     NetlistParseError.throw(
-                        f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{line} "
+                        f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{lines} "
                     )
 
             # Move to the next statement
@@ -155,20 +155,22 @@ suffix_pattern = "|".join(list(suffixes.keys()) + [k.lower() for k in suffixes.k
 
 # Master mapping of tokens <=> patterns
 tokens = dict(
+    DUBSLASH=r"\/\/",
+    DUBSTAR=r"\*\*",
     LPAREN=r"\(",
     RPAREN=r"\)",
     LBRACKET=r"\{",
     RBRACKET=r"\}",
-    WHITE=r"\s",
     NEWLINE=r"\n",
+    WHITE=r"\s",
     PLUS=r"\+",
     MINUS=r"\-",
     SLASH=r"\/",
     CARET=r"\^",
-    DUBSTAR=r"\*\*",
     STAR=r"\*",
     TICK=r"\'",
     COMMA=r"\,",
+    COLON=r"\:",
     EQUALS=r"\=",
     DOLLAR=r"\$",
     METRIC_NUM=rf"(\d+(\.\d+)?|\.\d+)({suffix_pattern})",  # 1M or 1.0f or .1k
@@ -176,8 +178,10 @@ tokens = dict(
     INT=r"\d+",
     INLINE=r"inline",
     SUBCKT=r"subckt",
+    MODEL=r"model",
     DEV_GAUSS=r"dev\/gauss",  # Perhaps there are more "dev/{x}" to be added; gauss is the known one for now.
     IDENT=r"[A-Za-z_][A-Za-z0-9_]*",
+    ERROR=r"[\s\S]",
 )
 # Given each token its name as a key in the overall regex
 tokens = {key: rf"(?P<{key}>{val})" for key, val in tokens.items()}
@@ -197,20 +201,68 @@ class Lexer:
     def __init__(self, txt: str):
         self.txt = txt
         self.parser = None
+        self.toks = None
+
+    def nxt(self) -> Optional[Token]:
+        m = next(self.toks, None)
+        if m is None:
+            return None
+        return Token(m.lastgroup, m.group())
+
+    def eat_idle(self, token) -> Optional[Token]:
+        """ Consume whitespace and comments, returning the next (potential) action-token. 
+        Does not handle line-continuations. """
+        while token and token.tp == Tokens.WHITE:
+            token = self.nxt()
+        if token and token.tp in (Tokens.DUBSLASH, Tokens.DOLLAR):  ##Tokens.STAR, ):
+            # Advance through comments
+            # FIXME: STAR comments - if self.parser.are_stars_comments_now():
+            while token and token.tp != Tokens.NEWLINE:
+                token = self.nxt()
+        return token
 
     def lex(self):
         """ Create an iterator over pattern-matches """
         sc = pat.scanner(self.txt)
-        for m in iter(sc.match, None):  # Iterate over token-matches
-            token = Token(m.lastgroup, m.group())
-            if token.tp != Tokens.WHITE:  # Filter out whitespace
-                yield token
+        self.toks = iter(sc.match, None)
+        token = self.nxt()
+        while token:  # Iterate over token-matches
+            
+            # Skip whitespace & comments
+            token = self.eat_idle(token)  
+
+            # Handle continuation-lines
+            if token and token.tp == Tokens.NEWLINE:
+
+                # Loop until a non-blank-line, non-comment, non-continuation token 
+                token = self.eat_idle(self.nxt())
+                while token and token.tp in (Tokens.NEWLINE, Tokens.WHITE,):
+                    token = self.eat_idle(self.nxt())
+                
+                if token and token.tp == Tokens.PLUS:  
+                    # Cancelled newline; skip to next token
+                    token = self.nxt()
+                else: 
+                    # Non-cancelled newline; yield the (already-passed) NEWLINE
+                    # Next loop-pass will get the first token on the next line 
+                    yield Token(Tokens.NEWLINE, "\n")
+                continue  # Either way, restart this loop body
+
+            yield token
+            token = self.nxt()
+
+
+class ParserState(Enum):
+    # States of the parser, as they need be understood by the lexer
+    PROGRAM = 0  # Typical program content
+    EXPR = 1  # High-priority expressions
 
 
 class LineParser:
     def __init__(self, s: str, dialect: Optional[SpiceDialect] = None):
         self.dialect = dialect or Dialect.from_enum(NetlistDialects.SPECTRE_SPICE)
         self.root = None
+        self.state = ParserState.PROGRAM
         # Initialize our state
         self.cur = None
         self.nxt = None  # It is (was) LL(1)
@@ -219,6 +271,11 @@ class LineParser:
         self.lex = Lexer(s)
         self.lex.parser = self
         self.tokens = self.lex.lex()
+
+    def are_stars_comments_now(self) -> bool:
+        """ Boolean indication of whether Tokens.STAR should 
+        currently be lexed as a comment. """
+        return self.state == ParserState.EXPR
 
     def start(self) -> None:
         # Queue up our lookahead tokens
@@ -260,37 +317,75 @@ class LineParser:
             NetlistParseError.throw()
         return self.root
 
+    def parse_model(self) -> Union[ModelDef, ModelFamily]:
+        """ Parse a (Spectre-format, for now) Model statement """
+        self.expect(Tokens.MODEL)
+        self.expect(Tokens.IDENT)
+        mname = Ident(self.cur.val)
+        self.expect(Tokens.IDENT)
+        mtype = Ident(self.cur.val)
+        if self.match(Tokens.LBRACKET):
+            self.expect(Tokens.NEWLINE)
+            # Multi-Variant Model Family
+            vars = []
+            while not self.match(Tokens.RBRACKET):
+                self.expect(Tokens.IDENT, Tokens.INT)
+                vname = Ident(str(self.cur.val))
+                self.expect(Tokens.COLON)
+                params = self.parse_param_declarations()
+                vars.append(ModelVariant(mname, vname, [], params))
+            self.expect(Tokens.NEWLINE)
+            return ModelFamily(mname, mtype, vars)
+        # Single ModelDef
+        params = self.parse_param_declarations()
+        return ModelDef(mname, mtype, [], params)
+
     def parse_subckt_start(self) -> StartSubckt:
         """ module_name ( port1 port2 port2 ) p1=param1 p2=param2 ... 
-        FIXME: spectre-only for now! 
-        Note predecessor keywords "suckt" and the optional "inline" 
-        have been removed by calling-time """
+        FIXME: spectre-only for now! """
 
         # Boolean indication of the `inline`-ness
         _inline = self.match(Tokens.INLINE)
         self.expect(Tokens.SUBCKT)
+
+        # Grab the module/subckt name
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
-        self.expect(Tokens.LPAREN)
 
-        # Parse port-names
-        ports = []
-        MAX_PORTS = 10_000  # "Time-out"
-        for i in range(MAX_PORTS, -1, -1):
-            if not self.nxt or self.match(Tokens.RPAREN):
-                break
-            self.expect(Tokens.IDENT, Tokens.INT)
-            pname = Ident(
-                str(self.cur.val)
-            )  # Note integer-valued node-names are stored as Ident(str)
-            ports.append(pname)
-        if i <= 0:  # Check whether the time-out triggered
-            NetlistParseError.throw()
+        # Parse the parens-optional port-list
+        if self.match(Tokens.LPAREN):  # Parens case
+            term = lambda s: not s.nxt or s.nxt.tp in (Tokens.RPAREN, Tokens.NEWLINE)
+            ports = self.parse_node_list(term)
+            self.expect(Tokens.RPAREN)
+
+        else:  # No-parens case
+            term = (
+                lambda s: not s.nxt
+                or s.nxt.tp == Tokens.NEWLINE
+                or not s.nxt1
+                or s.nxt1.tp == Tokens.EQUALS
+            )
+            ports = self.parse_node_list(term)
 
         # Parse parameters
         params = self.parse_param_declarations()
+
         # And create & return our instance
         return StartSubckt(name=name, ports=ports, params=params)
+
+    def parse_node_list(self, term, *, MAXN=10_000) -> List[Ident]:
+        """ Parse a Node-Identifier (Ident or Int) list, 
+        terminated in the condition `term(self)`. """
+        nodes = []
+        for i in range(MAXN, -1, -1):
+            if term(self):
+                break
+            self.expect(Tokens.IDENT, Tokens.INT)
+            pname = Ident(str(self.cur.val))
+            nodes.append(pname)
+        if i <= 0:  # Check whether the time-out triggered
+            NetlistParseError.throw()
+        return nodes
 
     def parse_instance(self) -> Instance:
         """ iname (? port1 port2 port2 )? mname p1=param1 p2=param2 ... """
@@ -299,34 +394,24 @@ class LineParser:
         conns = []
 
         # Parse the parens-optional port-list
-        if self.match(Tokens.LPAREN):
-            MAX_PORTS = 10_000  # "Time-out"
-            for i in range(MAX_PORTS, -1, -1):
-                if not self.nxt or self.match(Tokens.RPAREN):
-                    break
-                self.expect(Tokens.IDENT, Tokens.INT)
-                pname = Ident(
-                    str(self.cur.val)
-                )  # Note integer-valued node-names are stored as Ident(str)
-                conns.append(pname)
-            if i <= 0:  # Check whether the time-out triggered
-                NetlistParseError.throw()
+        if self.match(Tokens.LPAREN):  # Parens case
+            term = lambda s: not s.nxt or s.nxt.tp in (Tokens.RPAREN, Tokens.NEWLINE)
+            conns = self.parse_node_list(term)
+            self.expect(Tokens.RPAREN)
+
             # Grab the module name
             self.expect(Tokens.IDENT)
             module = Ident(self.cur.val)
 
         else:  # No-parens case
-            MAX_PORTS = 10_000  # "Time-out"
-            for i in range(MAX_PORTS, -1, -1):
-                if not self.nxt or not self.nxt1 or self.nxt1.tp == Tokens.EQUALS:
-                    break
-                self.expect(Tokens.IDENT, Tokens.INT)
-                name = Ident(
-                    str(self.cur.val)
-                )  # Note integer-valued node-names are stored as Ident(str)
-                conns.append(name)
-            if i <= 0:  # Check whether the time-out triggered
-                NetlistParseError.throw()
+            term = (
+                lambda s: not s.nxt
+                or s.nxt.tp == Tokens.NEWLINE
+                or not s.nxt1
+                or s.nxt1.tp == Tokens.EQUALS
+            )
+            conns = self.parse_node_list(term)
+
             # Grab the module name, at this point errantly in the `conns` list
             module = conns.pop()  # FIXME: check this matched `Ident` and not `Int`
 
@@ -336,12 +421,12 @@ class LineParser:
         return Instance(name=name, module=module, conns=conns, params=params)
 
     def parse_param_declarations(self) -> List[ParamDecl]:
-        """ ( ident = expr ( dev/gauss = expr )? ( $ units/commentary )? )* """
+        """ ( ident = expr ( dev/gauss = expr )? )* \n """
         rv = []
         # Set a (fairly artificial) "time-out" so we don't get stuck here
         MAX_ARGS = 1000
         for i in range(MAX_ARGS, -1, -1):
-            if self.nxt is None:
+            if self.nxt is None or self.match(Tokens.NEWLINE):
                 break
 
             self.expect(Tokens.IDENT)
@@ -349,10 +434,10 @@ class LineParser:
             self.expect(Tokens.EQUALS)
             e = self.parse_expr()
 
-            if self.match_any(Tokens.DEV_GAUSS, Tokens.DOLLAR):
+            if self.match(Tokens.DEV_GAUSS):
                 # FIXME: Skipping this auxiliary stuff for now
-                while self.nxt and not self.match(Tokens.NEWLINE):
-                    self.advance()
+                self.expect(Tokens.EQUALS)
+                e = self.parse_expr()
             rv.append(ParamDecl(name, e))
 
         if i <= 0:  # Check whether the time-out triggered
@@ -382,12 +467,16 @@ class LineParser:
         """ expr0 | 'expr0' | {expr0} """
         # FIXME: the ticks vs brackets syntax will become a Dialect-specific thing
         if self.match(Tokens.TICK):
+            self.state = ParserState.EXPR
             e = self.parse_expr0()
             self.expect(Tokens.TICK)
+            self.state = ParserState.PROGRAM
             return e
         if self.match(Tokens.LBRACKET):
+            self.state = ParserState.EXPR
             e = self.parse_expr0()
             self.expect(Tokens.RBRACKET)
+            self.state = ParserState.PROGRAM
             return e
         return self.parse_expr0()
 

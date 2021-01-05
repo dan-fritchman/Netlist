@@ -128,10 +128,7 @@ def test_instance():
         conns=[Ident(name="d"), Ident(name="g"), Ident(name="s"), Ident(name="b")],
         params=[
             ParamVal(name=Ident(name="l"), val=Int(val=11)),
-            ParamVal(
-                name=Ident(name="w"),
-                val=Ident(name="global_w")
-            ),
+            ParamVal(name=Ident(name="w"), val=Ident(name="global_w")),
         ],
     )
 
@@ -149,12 +146,137 @@ def test_subckt_def():
         name=Ident(name="mymos"),
         ports=[Ident(name="d"), Ident(name="g"), Ident(name="s"), Ident(name="b")],
         params=[
-            ParamDecl(name=Ident(name="l"), default=Int(val=11), unit=None, distr=None),
+            ParamDecl(name=Ident(name="l"), default=Int(val=11),  distr=None),
             ParamDecl(
                 name=Ident(name="w"),
                 default=Ident(name="global_w"),
-                unit=None,
+                
                 distr=None,
             ),
         ],
     )
+
+
+def test_model_family():
+
+    txt = """model npd_model bsim3 {
+ 0: type=n
+//
++ lmin = 1.0 lmax = 2.0 wmin = 1.2 wmax = 1.4
++ level = 999
++ // some commentary 
+
+
+// plus some blank lines 
+
++ tnom = 30 
+1: type=n 
++ version = 3.2 
++ xj = 1.2e-7 
++ lln = 1 
+// 
+//  Plus More Commentary 
+// 
++ lwn = 1 
+}
+"""
+
+    from netlist import LineParser, NetlistDialects, Dialect
+    from netlist import Ident, ParamDecl, Int, Float, ModelVariant, ModelFamily
+
+    p = LineParser(txt, Dialect.from_enum(NetlistDialects.SPECTRE),)
+    i = p.parse(p.parse_model)
+    print(i)
+    assert i == ModelFamily(
+        name=Ident(name="npd_model"),
+        mtype=Ident(name="bsim3"),
+        variants=[
+            ModelVariant(
+                model=Ident(name="npd_model"),
+                variant=Ident(name="0"),
+                args=[],
+                params=[
+                    ParamDecl(
+                        name=Ident(name="type"),
+                        default=Ident(name="n"),
+                        
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="lmin"),
+                        default=Float(val=1.0),
+                        
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="lmax"),
+                        default=Float(val=2.0),
+                        
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="wmin"),
+                        default=Float(val=1.2),
+                        
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="wmax"),
+                        default=Float(val=1.4),
+                        
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="level"),
+                        default=Int(val=999),
+                        
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="tnom"),
+                        default=Int(val=30),
+                        
+                        distr=None,
+                    ),
+                ],
+            ),
+            ModelVariant(
+                model=Ident(name="npd_model"),
+                variant=Ident(name="1"),
+                args=[],
+                params=[
+                    ParamDecl(
+                        name=Ident(name="type"),
+                        default=Ident(name="n"),
+                        
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="version"),
+                        default=Float(val=3.2),
+                        
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="xj"),
+                        default=Float(val=1.2e-07),
+                        
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="lln"),
+                        default=Int(val=1),
+                        
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="lwn"),
+                        default=Int(val=1),
+                        
+                        distr=None,
+                    ),
+                ],
+            ),
+        ],
+    )
+

@@ -34,18 +34,22 @@ class SpiceDialect(Dialect):
     SUBCKT_START_RE = rf"(.subckt|.SUBCKT)\s+({IDENTS_AND_PARAMS_RE})"
     SUBCKT_END_RE = rf"(.ends|.ENDS)(\s+{IDENT_RE}\s*)?"
 
-    def parse_stmt(self, line: str):
+    def parse_stmt(self, lines: List[str]):
         """ Statement Parser 
         Dispatches to type-specific parsers based on prioritized set of matching rules. """
 
+        # Mix this up in our new and old-style ways 
+        line = ''.join(lines)
+        oldline = lines[0].rstrip() + ' '.join(l[1:].rstrip() for l in lines[1:])
+
         # Comments get highest priority
-        if line.strip().startswith(self.COMMENT_CHAR):
+        if lines[0].strip().startswith(self.COMMENT_CHAR):
             return self.parse_comment(line)
 
         # In-progress porting to `Optional[Statement]` return type,
         # Where `None` indicates no-match
         rules = [
-            self.parse_primitive,
+            lambda l: self.parse_primitive(oldline),
             self.parse_instance,
             self.parse_subckt_start,
             self.parse_subckt_end,
@@ -57,16 +61,16 @@ class SpiceDialect(Dialect):
 
         # More-manual, even-older-school rules
         lc = line.lower()
-        if lc.startswith(".inc"):
-            return self.parse_inc(line)
-        if lc.startswith(".option"):
-            return self.parse_options(line)
+        if lc.startswith(".model"):
+            return self.parse_model_def(oldline)
         if lc.startswith(".param"):
             return self.parse_param_decls(line)
+        if lc.startswith(".inc"):
+            return self.parse_inc(oldline)
+        if lc.startswith(".option"):
+            return self.parse_options(oldline)
         if lc.startswith(".lib"):
-            return self.parse_dot_lib(line)
-        if lc.startswith(".model"):
-            return self.parse_model_def(line)
+            return self.parse_dot_lib(oldline)
         NetlistParseError.throw(f"Invalid Statement: {line}")
 
     PRIMITIVE_LEFT_RE = rf"([RrCcIiVvDdMmQq]{IDENT_CONT_RE}+\s+{EXPR_LIST_RE})"
@@ -104,39 +108,35 @@ class SpiceDialect(Dialect):
     def parse_subckt_start(self, line: str) -> Optional[StartSubckt]:
         m = re.match(r"\.subckt|\.SUBCKT", line)
         if m is None:
-            return None
+            return None 
 
-        def parse_idents_and_params(txt: str) -> (List[Ident], List[ParamDecl]):
-            """ Parsers (fairly common) strings of the form `xabc a b c mymodel d=1 e=2 f=3.9e19 """
-            m = re.match(re.compile(self.IDENTS_AND_PARAMS_RE), txt)
-            if m is None:
-                NetlistParseError.throw()
-            names = m.group(1)
-            rest = txt.replace(names, "")
-            names = [Ident(s) for s in names.split()]
-            params = self.parse_param_declarations(rest)
-            return (names, params)
+        txt = line.lstrip().lstrip(".subckt").lstrip(".SUBCKT")
 
-        txt = line.lstrip().lstrip(".subckt").lstrip(".SUBCKT").lstrip()
-        names, params = parse_idents_and_params(txt)
-        name = names[0]
-        ports = names[1:]
-        return StartSubckt(name, ports, params)
+        from .. import LineParser
+
+        p = LineParser("subckt " + txt, self) # FIXME! this cheater Spectre-method here 
+        return p.parse(p.parse_subckt_start) 
 
     @classmethod
     def parse_hier_path(cls, txt: str):
         return HierPath([Ident(i) for i in txt.split(cls.HIER_PATH_SEP)])
 
-    def parse_model_def(self, line: str):
+    def parse_model_def(self, line: str) -> Union[ModelDef, ModelVariant]:
         txt = line.replace(".model", "").replace(".MODEL", "")
         spl = txt.split()
-        name = self.parse_hier_path(
-            spl[0]
-        )  # FIXME: this may require specialty processing for Identifiers such as `0` in `nmos.0`
-        tp = Ident(spl[1].strip())
+        fullname = spl[0].strip()
+        mtype = Ident(spl[1].strip())
+        args = [Ident(s.strip()) for s in spl[2:]]
         rest = " ".join(spl[2:])
         params = self.parse_param_declarations(rest)
-        return ModelDef(name, args=[tp], params=params)
+
+        # Split the name into potential variants 
+        namepath = fullname.split('.')
+        if len(namepath) == 2:
+            return ModelVariant(model=Ident(namepath[0]), variant=Ident(namepath[1]), args=args, params=params) 
+        elif len(namepath) == 1:
+            return ModelDef(Ident(fullname), mtype, args, params)
+        NetlistParseError.throw() # Invalid Name 
 
     def parse_param_decls(self, line: str):
         txt = line.lower().replace(".param", "")

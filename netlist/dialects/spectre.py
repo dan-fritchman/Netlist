@@ -5,7 +5,7 @@ from .spice import Dialect, SpiceDialect
 class SpectreMixin:
     """ Misc Spectre-Stuff to be mixed-in """
 
-    COMMENT_CHARS = ["*", "//"]
+    COMMENT_CHARS = ["*", "//", "$"]
 
     @classmethod
     def is_comment(cls, s: str) -> bool:
@@ -36,15 +36,15 @@ class SpectreSpiceDialect(SpectreMixin, SpiceDialect):
 
     enum = NetlistDialects.SPECTRE_SPICE
 
-    def parse_stmt(self, line: str):
+    def parse_stmt(self, lines: List[str]):
         """ Inject a few rules specific to Spectre-Spice """
-        p = self.parse_comment(line)
+        p = self.parse_comment(''.join(lines))
         if p is not None:
             return p
-        p = self.parse_dialect_change(line)
+        p = self.parse_dialect_change(''.join(lines))
         if p is not None:
             return p
-        return super().parse_stmt(line)
+        return super().parse_stmt(lines)
 
 
 class SpectreDialect(SpectreMixin, Dialect):
@@ -55,16 +55,17 @@ class SpectreDialect(SpectreMixin, Dialect):
 
     HIER_PATH_SEP = "."
     CONTINUATION_CHAR = "+"
-    COMMENT_CHAR = "*"
 
     IDENT_START_RE = rf"[A-Za-z_]"  # Valid characters to start an identifier
     IDENT_CONT_RE = rf"[A-Za-z0-9_]"  # Valid (non-start) characters in identifiers
     IDENT_RE = rf"{IDENT_START_RE}{IDENT_CONT_RE}*"
     HIER_IDENT_RE = rf"({IDENT_RE})(\.{IDENT_RE})*"
 
-    def parse_stmt(self, line: str):
+    def parse_stmt(self, lines: List[str]):
         """ Statement Parser 
         Dispatches to type-specific parsers based on prioritized set of matching rules. """
+
+        line = ''.join(lines)
 
         rules = [
             self.parse_comment,
@@ -84,18 +85,22 @@ class SpectreDialect(SpectreMixin, Dialect):
 
     def parse_stats(self, line: str) -> Optional[StatisticsBlock]:
         """ Parse the `statistics` block, kinda. 
-        Just soaks up everything between its outer squiggly-brackets as a string, for now. """
+        FIXME: Just soaks up everything between its outer squiggly-brackets as a string, for now. """
         m = re.match("statistics", line, re.M)
         if m is None:
             return None
         return StatisticsBlock(self.parse_bracketed(line))
 
-    def parse_model_def(self, line: str):
-        # FIXME: parsing as `Unknown`, bracketed text
+    def parse_model_def(self, line: str) -> Union[ModelDef, ModelFamily]:
         m = re.match("model", line, re.M)
         if m is None:
             return None
-        return Unknown(self.parse_bracketed(line))
+
+        from .. import LineParser
+
+        txt = self.parse_bracketed(line)
+        p = LineParser(txt, self)
+        return p.parse(p.parse_model)
 
     def parse_bracketed(self, line: str) -> str:
         """ Parse multi-line bracketed text """
@@ -134,7 +139,7 @@ class SpectreDialect(SpectreMixin, Dialect):
         m = re.match(self.PARAM_DECL_RE, line, re.M)
         if m is None:
             return None
-        txt = line.lstrip().lstrip("parameters").lstrip()
+        txt = line.lstrip().lstrip("parameters") 
         return ParamDecls(self.parse_param_declarations(txt))
 
     # Instance expressions

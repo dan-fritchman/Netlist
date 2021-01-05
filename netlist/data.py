@@ -58,7 +58,6 @@ class ParamDecl:
 
     name: Ident
     default: "Expr"
-    unit: Optional[str] = None
     distr: Optional[str] = None
 
 
@@ -119,9 +118,25 @@ class EndSubckt:
 
 @dataclass
 class ModelDef:
-    name: HierPath  # FIXME: may need to be specialized
-    args: List[Ident]
-    params: List[ParamDecl]
+    name: Ident # Model Name 
+    mtype: Ident # Model Type
+    args: List[Ident] # Positional Arguments 
+    params: List[ParamDecl] # Parameter Declarations & Defaults
+
+
+@dataclass
+class ModelVariant:
+    model: Ident # Model Family Name 
+    variant: Ident # Variant Name
+    args: List[Ident] # Positional Arguments 
+    params: List[ParamDecl] # Parameter Declarations & Defaults
+
+
+@dataclass
+class ModelFamily:
+    name: Ident # Model Family Name 
+    mtype: Ident # Model Type
+    variants: List[ModelVariant] # Variants 
 
 
 @dataclass
@@ -188,6 +203,8 @@ Statement = Union[
     StartSubckt,
     EndSubckt,
     ModelDef,
+    ModelVariant,
+    ModelFamily,
     Include,
     StartLib,
     EndLib,
