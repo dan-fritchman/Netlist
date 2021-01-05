@@ -90,16 +90,6 @@ class SpiceDialect(Dialect):
         args = [LineParser(s, self).parse() for s in exprs]
         return Primitive(name, args, kwargs)
 
-    def parse_idents_and_params(self, txt: str) -> (List[Ident], ParamDecls):
-        """ Parsers (fairly common) strings of the form `xabc a b c mymodel d=1 e=2 f=3.9e19 """
-        m = re.match(re.compile(self.IDENTS_AND_PARAMS_RE), txt)
-        if m is None:
-            NetlistParseError.throw()
-        names = m.group(1)
-        rest = txt.replace(names, "")
-        names = [Ident(s) for s in names.split()]
-        params = self.parse_param_values(rest)
-        return (names, params)
 
     @classmethod
     def parse_subckt_end(cls, txt: str) -> EndSubckt:
@@ -116,8 +106,19 @@ class SpiceDialect(Dialect):
         if m is None:
             return None
 
-        txt = line.replace(".subckt", "").replace(".SUBCKT", "")
-        names, params = self.parse_idents_and_params(txt)
+        def parse_idents_and_params(txt: str) -> (List[Ident], List[ParamDecl]):
+            """ Parsers (fairly common) strings of the form `xabc a b c mymodel d=1 e=2 f=3.9e19 """
+            m = re.match(re.compile(self.IDENTS_AND_PARAMS_RE), txt)
+            if m is None:
+                NetlistParseError.throw()
+            names = m.group(1)
+            rest = txt.replace(names, "")
+            names = [Ident(s) for s in names.split()]
+            params = self.parse_param_declarations(rest)
+            return (names, params)
+
+        txt = line.lstrip().lstrip(".subckt").lstrip(".SUBCKT").lstrip()
+        names, params = parse_idents_and_params(txt)
         name = names[0]
         ports = names[1:]
         return StartSubckt(name, ports, params)
@@ -134,12 +135,12 @@ class SpiceDialect(Dialect):
         )  # FIXME: this may require specialty processing for Identifiers such as `0` in `nmos.0`
         tp = Ident(spl[1].strip())
         rest = " ".join(spl[2:])
-        params = self.parse_param_values(rest)
+        params = self.parse_param_declarations(rest)
         return ModelDef(name, args=[tp], params=params)
 
     def parse_param_decls(self, line: str):
         txt = line.lower().replace(".param", "")
-        return self.parse_param_values(txt)
+        return ParamDecls(self.parse_param_declarations(txt))
 
     def parse_options(self, line: str):
         txt = line.lower().replace(".option", "")

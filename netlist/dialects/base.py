@@ -49,9 +49,15 @@ class Dialect:
         p = LineParser(txt, self)
         return p.parse(f=p.parse_instance)
 
-    def parse_param_values(self, line: str) -> ParamDecls:
+    def parse_param_declarations(self, line: str) -> List[ParamDecl]:
         from .. import LineParser
 
         p = LineParser(line, self)
         return p.parse(f=p.parse_param_declarations)
+
+    def parse_param_values(self, line: str) -> List[ParamVal]:
+        from .. import LineParser
+
+        p = LineParser(line, self)
+        return p.parse(f=p.parse_param_values)
 

@@ -1,5 +1,6 @@
-from ..data import * 
+from ..data import *
 from .spice import Dialect, SpiceDialect
+
 
 class SpectreMixin:
     """ Misc Spectre-Stuff to be mixed-in """
@@ -59,22 +60,7 @@ class SpectreDialect(SpectreMixin, Dialect):
     IDENT_START_RE = rf"[A-Za-z_]"  # Valid characters to start an identifier
     IDENT_CONT_RE = rf"[A-Za-z0-9_]"  # Valid (non-start) characters in identifiers
     IDENT_RE = rf"{IDENT_START_RE}{IDENT_CONT_RE}*"
-    IDENTS_LIST_RE = (
-        rf"({IDENT_RE}\s+)+{IDENT_RE}?"  # FIXME: (\s+|$)) Form: name1 name2 a0 _b etc
-    )
     HIER_IDENT_RE = rf"({IDENT_RE})(\.{IDENT_RE})*"
-    MODEL_NAME_RE = rf"({IDENT_RE})(\.([A-Za-z_0-9]*))?"  # E.g. `nmos`, `nmos.0`
-    NODE_NAME_RE = rf"([A-Za-z0-9_:]+)"  # Node names are much more foregiving. `i:`, `___`, `123`, etc are all valid
-    NODE_LIST_RE = rf"({NODE_NAME_RE})(\s+{NODE_NAME_RE})*"
-    PORT_CONN_RE = rf"({NODE_LIST_RE}|\(\s*{NODE_LIST_RE}\s*\))"  # Optionally paren-surrounded node-list, e.g. `d g s b`, `(d g s b)`
-
-    EXPR_RE = r"([^=]+\n|[^\s=]+|'[^=]+'|{[^=]+})"  # Parameter expression, inside or outside bracketing
-    EXPR_LIST_RE = rf"({EXPR_RE})(\s+{EXPR_RE})*"  # FIXME: (\s+|$)
-    UNITS_RE = rf"$([.*])\n"
-    PARAM_SET_RE = rf"({IDENT_RE})\s*\=\s*({EXPR_RE})"  ## FIXME: units ## (\s*|({UNITS_RE})?)' # Form a=5 b=6 c=7
-    PARAM_KWARGS_RE = rf"({PARAM_SET_RE})(\s+{PARAM_SET_RE})*"
-    IDENTS_AND_PARAMS_RE = rf"({IDENTS_LIST_RE})({PARAM_KWARGS_RE})?"  # Form: name arg1 arg2 arg3 a=3 b=4 c=5
-    PARAMS_ARG_AND_KWARG_RE = rf"({EXPR_LIST_RE})\s+({PARAM_KWARGS_RE})?"  # Form: 'expr' 'expr1*expr2' '1e-9' a=3 b='16-11' c=0
 
     def parse_stmt(self, line: str):
         """ Statement Parser 
@@ -121,23 +107,17 @@ class SpectreDialect(SpectreMixin, Dialect):
             depth = txt.count("{") - txt.count("}")
         return txt
 
-    SUBCKT_LEFT_RE = rf"(inline\s+)?(subckt)\s+({IDENT_RE})\s+({PORT_CONN_RE})"
-    SUBCKT_START_RE = rf"({SUBCKT_LEFT_RE})(\s+{PARAM_KWARGS_RE})?\s*$"
+    SUBCKT_START_RE = rf"(inline\s+)?(subckt)"
 
     def parse_subckt_start(self, line: str) -> Optional[StartSubckt]:
         m = re.match(self.SUBCKT_START_RE, line, re.M)
         if m is None:
             return None
-        left = m.group(1)
-        rest = line.replace(left, "")
-        params = self.parse_param_values(rest)
 
-        ml = re.match(self.SUBCKT_LEFT_RE, left, re.M)
-        if ml is None:
-            raise NetlistParseError
-        name = Ident(ml.group(3))
-        ports = [Ident(p) for p in ml.group(4).split()]
-        return StartSubckt(name, ports, params)
+        from .. import LineParser
+
+        p = LineParser(line, self)
+        return p.parse(p.parse_subckt_start)
 
     def parse_subckt_end(self, txt: str) -> Optional[EndSubckt]:
         SUBCKT_END_RE = rf"(ends)\s+({self.IDENT_RE})\s*$"
@@ -150,27 +130,15 @@ class SpectreDialect(SpectreMixin, Dialect):
 
     PARAM_DECL_RE = rf"\s*parameters\s+"
 
-    def parse_param_decls(self, line: str):
+    def parse_param_decls(self, line: str) -> Optional[ParamDecls]:
         m = re.match(self.PARAM_DECL_RE, line, re.M)
         if m is None:
             return None
         txt = line.lstrip().lstrip("parameters").lstrip()
-        return self.parse_param_values(txt)
+        return ParamDecls(self.parse_param_declarations(txt))
 
     # Instance expressions
-    INST_LEFT_RE = rf"({IDENT_RE})\s+({PORT_CONN_RE})\s+({IDENT_RE})"
-    INSTANCE_RE = rf"({INST_LEFT_RE})\s+({PARAM_KWARGS_RE})\s*$"
-
-    def parse_idents_and_params(self, txt: str) -> (List[Ident], ParamDecls):
-        """ Parses (fairly common) strings of the form `xabc a b c mymodel d=1 e=2 f=3.9e19 """
-        m = re.match(re.compile(self.IDENTS_AND_PARAMS_RE), txt)
-        if m is None:
-            raise NetlistParseError
-        names = m.group(1)
-        rest = txt.replace(names, "")
-        names = [Ident(s) for s in names.split()]
-        params = self.parse_param_values(rest)
-        return (names, params)
+    INSTANCE_RE = IDENT_RE
 
     @classmethod
     def parse_options(cls, line: str):

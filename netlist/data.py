@@ -1,12 +1,11 @@
 import os
-from pathlib import Path
 import re
+from enum import Enum
+from pathlib import Path
+from typing import Optional, Any, Dict, Union, List, Tuple
 
 from pydantic import ValidationError
 from pydantic.dataclasses import dataclass
-from typing import Optional, Any, Dict, Union, List, Tuple
-
-from enum import Enum
 
 
 class NetlistParseError(Exception):
@@ -54,6 +53,9 @@ class HierPath:
 
 @dataclass(eq=True, frozen=True)
 class ParamDecl:
+    """ Parameter Declaration 
+    Includes Optional Distribution & Unit Information """
+
     name: Ident
     default: "Expr"
     unit: Optional[str] = None
@@ -62,7 +64,18 @@ class ParamDecl:
 
 @dataclass(eq=True, frozen=True)
 class ParamDecls:
+    """ Parameter Declarations, 
+    as via the `param` keywords. """
+
     params: List[ParamDecl]
+
+
+@dataclass(eq=True, frozen=True)
+class ParamVal:
+    """ Parameter Value-Set """
+
+    name: Ident
+    val: "Expr"
 
 
 @dataclass
@@ -72,7 +85,7 @@ class Instance:
     name: Ident
     module: Ident
     conns: Union[List[Ident], List[Tuple[Ident, Ident]]]
-    params: ParamDecls  # FIXME: will be just List[(Ident, "Expr")], without the parameter declaration annotations
+    params: List[ParamVal]
 
 
 @dataclass
@@ -84,19 +97,19 @@ class Primitive:
 
     name: Ident
     args: List["Expr"]
-    kwargs: ParamDecls
+    kwargs: List[ParamVal]
 
 
 @dataclass
 class Options:
-    vals: ParamDecls
+    vals: List[ParamVal]
 
 
 @dataclass
 class StartSubckt:
-    name: Ident
-    ports: List[Ident]
-    params: ParamDecls
+    name: Ident  # Module/ Subcircuit Name
+    ports: List[Ident]  # Port List
+    params: List[ParamDecl]  # Parameter Declarations
 
 
 @dataclass
@@ -108,7 +121,7 @@ class EndSubckt:
 class ModelDef:
     name: HierPath  # FIXME: may need to be specialized
     args: List[Ident]
-    params: ParamDecls
+    params: List[ParamDecl]
 
 
 @dataclass
@@ -132,6 +145,7 @@ class UseLib:
     section: Ident
 
 
+@dataclass
 class End:
     """ Empty class represents `.end` Statements """
 
@@ -164,13 +178,42 @@ class DialectChange:
     dialect: str
 
 
-Statement = Union[Instance, ModelDef, Comment]  # ... and a lot more things to come
+# The big union-type of everything that makes a valid single-line statement
+Statement = Union[
+    Comment,
+    ParamDecls,
+    Instance,
+    Primitive,
+    Options,
+    StartSubckt,
+    EndSubckt,
+    ModelDef,
+    Include,
+    StartLib,
+    EndLib,
+    UseLib,
+    End,
+    DialectChange,
+    StatisticsBlock,
+    Unknown,
+]
 
 
 @dataclass
 class Entry:
-    content: Any  # FIXME: Statement
+    content: Statement
     source_info: Optional[SourceInfo] = None
+
+
+@dataclass
+class SourceFile:
+    path: Path  # Source File Path
+    contents: List[Entry]  # Statements and their associated SourceInfo
+
+
+@dataclass
+class Program:
+    files: List[SourceFile]  # List of Source-File Contents
 
 
 @dataclass
@@ -226,5 +269,10 @@ class BinOp:
 # Update all the forward-type-references
 Call.__pydantic_model__.update_forward_refs()
 Primitive.__pydantic_model__.update_forward_refs()
+ParamVal.__pydantic_model__.update_forward_refs()
 ParamDecl.__pydantic_model__.update_forward_refs()
+ParamDecls.__pydantic_model__.update_forward_refs()
 SourceInfo.__pydantic_model__.update_forward_refs()
+Entry.__pydantic_model__.update_forward_refs()
+SourceFile.__pydantic_model__.update_forward_refs()
+Program.__pydantic_model__.update_forward_refs()

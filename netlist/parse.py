@@ -9,6 +9,7 @@ class Parser:
         self.entries: List[Entry] = []
         self.line = self.nxt = "*"  # Initialize our two lines worth of input strings
         self.line_num = 1
+        self.program = Program([])
 
     @classmethod
     def default_dialect(cls, path: os.PathLike) -> "NetlistDialects":
@@ -63,25 +64,22 @@ class Parser:
                     break  # Break on end-of-file
                 self.advance()
 
-            if not line.strip():  # Filter out empties 
-                continue 
-
-            # Collected a statement, parse it
-            try: 
-                s = self.dialect.parse_stmt(line.lstrip())
-                e = Entry(
-                    content=s,
-                    source_info=SourceInfo(
-                        path=self.path,
-                        line=start_line_num,
-                        dialect=self.dialect.enum,
-                    ),
-                )
-                entries.append(e)
-            except (NetlistParseError, ValidationError) as e:
-                NetlistParseError.throw(
-                    f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{line} "
-                )
+            if line.strip():  # Filter out empties
+                try:  # Collected a statement, parse it
+                    s = self.dialect.parse_stmt(line.lstrip())
+                    e = Entry(
+                        content=s,
+                        source_info=SourceInfo(
+                            path=self.path,
+                            line=start_line_num,
+                            dialect=self.dialect.enum,
+                        ),
+                    )
+                    entries.append(e)
+                except (NetlistParseError, ValidationError) as e:
+                    NetlistParseError.throw(
+                        f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{line} "
+                    )
 
             # Move to the next statement
             start_line_num = self.line_num
@@ -103,6 +101,9 @@ class Parser:
             self.fp = f
             entries = self._parse_file()
 
+        # Add it to our parsed result
+        self.program.files.append(SourceFile(p, entries))
+
         # 2nd pass, parse include-files
         for e in entries:
             s = e.content
@@ -111,8 +112,9 @@ class Parser:
                 incp = s.path if s.path.is_absolute() else p.parent / s.path
                 if not incp.exists() or not incp.is_file():
                     raise FileNotFoundError(incp)
-                
+
                 from .dialects.spectre import SpectreMixin
+
                 if isinstance(self.dialect, SpectreMixin):
                     # Update our dialect based on the file-extension we load
                     d_enum = Parser.default_dialect(path)
@@ -123,12 +125,13 @@ class Parser:
                 NetlistParseError.throw()
 
 
-def parse(path: os.PathLike, *, dialect=None) -> Parser:
+def parse(path: os.PathLike, *, dialect=None) -> Program:
+    """ Parse a Multi-File Netlist-Program """
     if dialect is None:
         dialect = Parser.default_dialect(path)
     p = Parser(dialect)
     p.parse(path)
-    return p
+    return p.program
 
 
 # Numeric-value suffixes
@@ -171,6 +174,8 @@ tokens = dict(
     METRIC_NUM=rf"(\d+(\.\d+)?|\.\d+)({suffix_pattern})",  # 1M or 1.0f or .1k
     FLOAT=r"(\d+[eE][+-]?\d+|(\d+\.\d*|\.\d+)([eE][+-]?\d+)?)",  # 1e3 or 1.0 or .1 (optional e-3)
     INT=r"\d+",
+    INLINE=r"inline",
+    SUBCKT=r"subckt",
     DEV_GAUSS=r"dev\/gauss",  # Perhaps there are more "dev/{x}" to be added; gauss is the known one for now.
     IDENT=r"[A-Za-z_][A-Za-z0-9_]*",
 )
@@ -255,6 +260,38 @@ class LineParser:
             NetlistParseError.throw()
         return self.root
 
+    def parse_subckt_start(self) -> StartSubckt:
+        """ module_name ( port1 port2 port2 ) p1=param1 p2=param2 ... 
+        FIXME: spectre-only for now! 
+        Note predecessor keywords "suckt" and the optional "inline" 
+        have been removed by calling-time """
+
+        # Boolean indication of the `inline`-ness
+        _inline = self.match(Tokens.INLINE)
+        self.expect(Tokens.SUBCKT)
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        self.expect(Tokens.LPAREN)
+
+        # Parse port-names
+        ports = []
+        MAX_PORTS = 10_000  # "Time-out"
+        for i in range(MAX_PORTS, -1, -1):
+            if not self.nxt or self.match(Tokens.RPAREN):
+                break
+            self.expect(Tokens.IDENT, Tokens.INT)
+            pname = Ident(
+                str(self.cur.val)
+            )  # Note integer-valued node-names are stored as Ident(str)
+            ports.append(pname)
+        if i <= 0:  # Check whether the time-out triggered
+            NetlistParseError.throw()
+
+        # Parse parameters
+        params = self.parse_param_declarations()
+        # And create & return our instance
+        return StartSubckt(name=name, ports=ports, params=params)
+
     def parse_instance(self) -> Instance:
         """ iname (? port1 port2 port2 )? mname p1=param1 p2=param2 ... """
         self.expect(Tokens.IDENT)
@@ -268,10 +305,10 @@ class LineParser:
                 if not self.nxt or self.match(Tokens.RPAREN):
                     break
                 self.expect(Tokens.IDENT, Tokens.INT)
-                name = Ident(
+                pname = Ident(
                     str(self.cur.val)
                 )  # Note integer-valued node-names are stored as Ident(str)
-                conns.append(name)
+                conns.append(pname)
             if i <= 0:  # Check whether the time-out triggered
                 NetlistParseError.throw()
             # Grab the module name
@@ -294,12 +331,12 @@ class LineParser:
             module = conns.pop()  # FIXME: check this matched `Ident` and not `Int`
 
         # Parse parameters
-        params = self.parse_param_declarations()
+        params = self.parse_param_values()
         # And create & return our instance
         return Instance(name=name, module=module, conns=conns, params=params)
 
-    def parse_param_declarations(self) -> ParamDecls:
-        """ ( ident = exprt ( dev/gauss = expr )? ( $ units/commentary )? )* """
+    def parse_param_declarations(self) -> List[ParamDecl]:
+        """ ( ident = expr ( dev/gauss = expr )? ( $ units/commentary )? )* """
         rv = []
         # Set a (fairly artificial) "time-out" so we don't get stuck here
         MAX_ARGS = 1000
@@ -320,7 +357,26 @@ class LineParser:
 
         if i <= 0:  # Check whether the time-out triggered
             NetlistParseError.throw()
-        return ParamDecls(rv)
+        return rv
+
+    def parse_param_values(self) -> List[ParamVal]:
+        """ ( ident = expr )* """
+        rv = []
+        # Set a (fairly artificial) "time-out" so we don't get stuck here
+        MAX_ARGS = 10_000
+        for i in range(MAX_ARGS, -1, -1):
+            if self.nxt is None or self.match(Tokens.NEWLINE):
+                break
+
+            self.expect(Tokens.IDENT)
+            name = Ident(self.cur.val)
+            self.expect(Tokens.EQUALS)
+            e = self.parse_expr()
+            rv.append(ParamVal(name, e))
+
+        if i <= 0:  # Check whether the time-out triggered
+            NetlistParseError.throw()
+        return rv
 
     def parse_expr(self) -> Expr:
         """ expr0 | 'expr0' | {expr0} """
@@ -394,10 +450,4 @@ class LineParser:
                 return Call(func=name, args=args)
             return name
         NetlistParseError.throw()
-
-
-def parse_expression(s: str) -> LineParser:
-    parser = LineParser(s)
-    parser.parse()
-    return parser
 
