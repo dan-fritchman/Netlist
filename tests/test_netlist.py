@@ -186,7 +186,6 @@ def test_model_family():
 
     p = LineParser(txt, Dialect.from_enum(NetlistDialects.SPECTRE),)
     i = p.parse(p.parse_model)
-    print(i)
     assert i == ModelFamily(
         name=Ident(name="npd_model"),
         mtype=Ident(name="bsim3"),

@@ -73,16 +73,19 @@ class SpiceDialect(Dialect):
             return self.parse_dot_lib(oldline)
         NetlistParseError.throw(f"Invalid Statement: {line}")
 
-    PRIMITIVE_LEFT_RE = rf"([RrCcIiVvDdMmQq]{IDENT_CONT_RE}+\s+{EXPR_LIST_RE})"
-    PRIMITIVE_RE = rf"({PRIMITIVE_LEFT_RE})(\s+{PARAM_KWARGS_RE})?\s*$"
+    PRIMITIVE_LEFT_RE = rf"[RrCcIiVvDdMmQq]{IDENT_CONT_RE}+\s+"
+    # PRIMITIVE_LEFT_RE = rf"([RrCcIiVvDdMmQq]{IDENT_CONT_RE}+\s+{EXPR_LIST_RE})"
+    # PRIMITIVE_RE = rf"({PRIMITIVE_LEFT_RE})(\s+{PARAM_KWARGS_RE})?\s*$"
 
     INSTANCE_RE = rf"[Xx]{IDENT_CONT_RE}+"
 
     def parse_primitive(self, txt: str) -> Optional[Primitive]:
         """ Parse a Primitive Instance """
-        m = re.match(re.compile(self.PRIMITIVE_RE), txt)
+        m = re.match(re.compile(self.PRIMITIVE_LEFT_RE), txt)
         if m is None:
             return None
+
+        return Primitive(name=Ident("FAKE"), args=[], kwargs=[]) # FIXME! 
         exprs = m.group(1)
         rest = txt.replace(exprs, "")
         kwargs = self.parse_param_values(rest)
@@ -122,6 +125,10 @@ class SpiceDialect(Dialect):
         return HierPath([Ident(i) for i in txt.split(cls.HIER_PATH_SEP)])
 
     def parse_model_def(self, line: str) -> Union[ModelDef, ModelVariant]:
+        return ModelDef(Ident("fake"), mtype=Ident("fakemodel"), args=[], params=[]) # FIXME !
+
+
+
         txt = line.replace(".model", "").replace(".MODEL", "")
         spl = txt.split()
         fullname = spl[0].strip()

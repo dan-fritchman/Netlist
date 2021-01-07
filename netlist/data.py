@@ -57,7 +57,7 @@ class ParamDecl:
     Includes Optional Distribution & Unit Information """
 
     name: Ident
-    default: "Expr"
+    default: Optional["Expr"]
     distr: Optional[str] = None
 
 
@@ -118,29 +118,34 @@ class EndSubckt:
 
 @dataclass
 class ModelDef:
-    name: Ident # Model Name 
-    mtype: Ident # Model Type
-    args: List[Ident] # Positional Arguments 
-    params: List[ParamDecl] # Parameter Declarations & Defaults
+    name: Ident  # Model Name
+    mtype: Ident  # Model Type
+    args: List[Ident]  # Positional Arguments
+    params: List[ParamDecl]  # Parameter Declarations & Defaults
 
 
 @dataclass
 class ModelVariant:
-    model: Ident # Model Family Name 
-    variant: Ident # Variant Name
-    args: List[Ident] # Positional Arguments 
-    params: List[ParamDecl] # Parameter Declarations & Defaults
+    model: Ident  # Model Family Name
+    variant: Ident  # Variant Name
+    args: List[Ident]  # Positional Arguments
+    params: List[ParamDecl]  # Parameter Declarations & Defaults
 
 
 @dataclass
 class ModelFamily:
-    name: Ident # Model Family Name 
-    mtype: Ident # Model Type
-    variants: List[ModelVariant] # Variants 
+    name: Ident  # Model Family Name
+    mtype: Ident  # Model Type
+    variants: List[ModelVariant]  # Variants
 
 
 @dataclass
 class Include:
+    path: Path
+
+
+@dataclass
+class AhdlInclude:
     path: Path
 
 
@@ -206,6 +211,7 @@ Statement = Union[
     ModelVariant,
     ModelFamily,
     Include,
+    AhdlInclude,
     StartLib,
     EndLib,
     UseLib,
@@ -281,6 +287,13 @@ class BinOp:
     tp: str
     left: Expr
     right: Expr
+
+
+@dataclass
+class TernOp:
+    cond: Expr
+    if_true: Expr
+    if_false: Expr
 
 
 # Update all the forward-type-references

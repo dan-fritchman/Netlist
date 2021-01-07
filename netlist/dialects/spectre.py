@@ -67,6 +67,9 @@ class SpectreDialect(SpectreMixin, Dialect):
 
         line = ''.join(lines)
 
+        if line.startswith('ahdl'): 
+            return AhdlInclude(Path("???")) # FIXME!
+
         rules = [
             self.parse_comment,
             self.parse_dialect_change,
@@ -125,13 +128,16 @@ class SpectreDialect(SpectreMixin, Dialect):
         return p.parse(p.parse_subckt_start)
 
     def parse_subckt_end(self, txt: str) -> Optional[EndSubckt]:
-        SUBCKT_END_RE = rf"(ends)\s+({self.IDENT_RE})\s*$"
+        SUBCKT_END_RE = rf"ends"
         m = re.match(re.compile(SUBCKT_END_RE), txt)
         if m is None:
             return None
-        name = m.group(1)
-        ident = None if not name else name
-        return EndSubckt(Ident(ident))
+
+        
+        from .. import LineParser
+
+        p = LineParser(txt, self)
+        return p.parse(p.parse_end_sub) 
 
     PARAM_DECL_RE = rf"\s*parameters\s+"
 

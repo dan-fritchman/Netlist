@@ -1,8 +1,24 @@
+from warnings import warn
+from .data import NetlistDialects, NetlistParseError, Unknown
 from .data import *
 from .dialects import *
 
 
-class Parser:
+def default_dialect(path: os.PathLike) -> NetlistDialects:
+    """ Infer a default dialect from a file name, particularly its suffix. 
+    For files of suffix `scs` this is straightforwardly set to SPECTRE. 
+    All other suffixes are less clear without knowing more context. 
+    They are set to the most flexible SPECTRE_SPICE, which includes dialect-changes. """
+
+    p = Path(path).absolute()
+    if not p.exists() or not p.is_file():
+        raise FileNotFoundError(p)
+    if p.suffix == "scs":
+        return NetlistDialects.SPECTRE
+    return NetlistDialects.SPECTRE_SPICE
+
+
+class FileParser:
     def __init__(self, dialect: Optional[NetlistDialects] = None):
         self.dialect = Dialect.from_enum(dialect)(self)
         self.deps: List[Path] = []
@@ -10,20 +26,6 @@ class Parser:
         self.line = self.nxt = "*"  # Initialize our two lines worth of input strings
         self.line_num = 1
         self.program = Program([])
-
-    @classmethod
-    def default_dialect(cls, path: os.PathLike) -> "NetlistDialects":
-        """ Infer a default dialect from a file name, particularly its suffix. 
-        For files of suffix `scs` this is straightforwardly set to SPECTRE. 
-        All other suffixes are less clear without knowing more context. 
-        They are set to the most flexible SPECTRE_SPICE, which includes dialect-changes. """
-
-        p = Path(path).absolute()
-        if not p.exists() or not p.is_file():
-            raise FileNotFoundError(p)
-        if p.suffix == "scs":
-            return NetlistDialects.SPECTRE
-        return NetlistDialects.SPECTRE_SPICE
 
     def notify(self, reason: DialectChange):
         """ Notification from dialect-parser that something's up. 
@@ -65,21 +67,20 @@ class Parser:
                 self.advance()
 
             if any(line.strip() for line in lines):  # Filter out empties
+                si = SourceInfo(
+                    path=self.path, line=start_line_num, dialect=self.dialect.enum,
+                )
                 try:  # Collected a statement, parse it
                     s = self.dialect.parse_stmt(lines)
-                    e = Entry(
-                        content=s,
-                        source_info=SourceInfo(
-                            path=self.path,
-                            line=start_line_num,
-                            dialect=self.dialect.enum,
-                        ),
-                    )
+                    e = Entry(s, si)
                     entries.append(e)
                 except (NetlistParseError, ValidationError) as e:
-                    NetlistParseError.throw(
-                        f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{lines} "
-                    )
+                    warn(e)
+                    e = Entry(Unknown("\n".join(lines)), si)
+                    entries.append(e)
+                    # NetlistParseError.throw(
+                    #     f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{lines} "
+                    # )
 
             # Move to the next statement
             start_line_num = self.line_num
@@ -89,27 +90,42 @@ class Parser:
         self.entries.extend(entries)
         return entries
 
+    def parse(self, path: Path) -> SourceFile:
+
+        with open(path, "r") as f:
+            self.path = path
+            self.fp = f
+            entries = self._parse_file()
+
+        return SourceFile(path, entries)
+
+
+class Parser:
+    def __init__(self, dialect: Optional[NetlistDialects] = None):
+        self.deps: List[Path] = []
+        self.program = Program([])
+        self.dialect = dialect
+        self.file_parser = FileParser(dialect)
+
     def parse(self, path: os.PathLike):
         # Check for validity of source file
         p = Path(path).absolute()
         if not p.exists() or not p.is_file():
             raise FileNotFoundError(p)
+
         # Source Found; Start Parsing
         self.deps.append(p)
-        with open(p, "r") as f:
-            self.path = p
-            self.fp = f
-            entries = self._parse_file()
-
+        f = self.file_parser.parse(p)
         # Add it to our parsed result
-        self.program.files.append(SourceFile(p, entries))
+        self.program.files.append(f)
 
-        # 2nd pass, parse include-files
-        for e in entries:
+        # 2nd pass, parse included-files
+        for e in f.contents:
             s = e.content
             if isinstance(s, Include):
                 # Differentiate absolute vs relative paths, relative to active source-file
                 incp = s.path if s.path.is_absolute() else p.parent / s.path
+                incp = incp.resolve()
                 if not incp.exists() or not incp.is_file():
                     raise FileNotFoundError(incp)
 
@@ -117,20 +133,29 @@ class Parser:
 
                 if isinstance(self.dialect, SpectreMixin):
                     # Update our dialect based on the file-extension we load
-                    d_enum = Parser.default_dialect(path)
-                    self.dialect = Dialect.from_enum(d_enum)(self)
+                    d_enum = default_dialect(path)
+                    self.file_parser = FileParser(d_enum)
+                else:
+                    self.file_parser = FileParser(self.dialect)
                 self.parse(incp)
             if isinstance(s, UseLib):
                 # Not supported, yet
                 NetlistParseError.throw()
 
+    def entries(self):
+        """ Iterator of all parsed entries """
+        for f in self.program.files:
+            for e in f.contents:
+                yield e
 
 def parse(path: os.PathLike, *, dialect=None) -> Program:
     """ Parse a Multi-File Netlist-Program """
-    if dialect is None:
-        dialect = Parser.default_dialect(path)
-    p = Parser(dialect)
+    d = dialect or default_dialect(path)
+    p = Parser(d)
     p.parse(path)
+    for e in p.entries():
+        if isinstance(e.content, Unknown):
+            print(e)
     return p.program
 
 
@@ -173,11 +198,13 @@ tokens = dict(
     COLON=r"\:",
     EQUALS=r"\=",
     DOLLAR=r"\$",
+    QUESTION=r"\?",
     METRIC_NUM=rf"(\d+(\.\d+)?|\.\d+)({suffix_pattern})",  # 1M or 1.0f or .1k
     FLOAT=r"(\d+[eE][+-]?\d+|(\d+\.\d*|\.\d+)([eE][+-]?\d+)?)",  # 1e3 or 1.0 or .1 (optional e-3)
     INT=r"\d+",
     INLINE=r"inline",
     SUBCKT=r"subckt",
+    ENDS=r"ends",
     MODEL=r"model",
     DEV_GAUSS=r"dev\/gauss",  # Perhaps there are more "dev/{x}" to be added; gauss is the known one for now.
     IDENT=r"[A-Za-z_][A-Za-z0-9_]*",
@@ -227,24 +254,24 @@ class Lexer:
         self.toks = iter(sc.match, None)
         token = self.nxt()
         while token:  # Iterate over token-matches
-            
+
             # Skip whitespace & comments
-            token = self.eat_idle(token)  
+            token = self.eat_idle(token)
 
             # Handle continuation-lines
             if token and token.tp == Tokens.NEWLINE:
 
-                # Loop until a non-blank-line, non-comment, non-continuation token 
+                # Loop until a non-blank-line, non-comment, non-continuation token
                 token = self.eat_idle(self.nxt())
                 while token and token.tp in (Tokens.NEWLINE, Tokens.WHITE,):
                     token = self.eat_idle(self.nxt())
-                
-                if token and token.tp == Tokens.PLUS:  
+
+                if token and token.tp == Tokens.PLUS:
                     # Cancelled newline; skip to next token
                     token = self.nxt()
-                else: 
+                else:
                     # Non-cancelled newline; yield the (already-passed) NEWLINE
-                    # Next loop-pass will get the first token on the next line 
+                    # Next loop-pass will get the first token on the next line
                     yield Token(Tokens.NEWLINE, "\n")
                 continue  # Either way, restart this loop body
 
@@ -373,19 +400,38 @@ class LineParser:
         # And create & return our instance
         return StartSubckt(name=name, ports=ports, params=params)
 
-    def parse_node_list(self, term, *, MAXN=10_000) -> List[Ident]:
-        """ Parse a Node-Identifier (Ident or Int) list, 
-        terminated in the condition `term(self)`. """
-        nodes = []
+    def parse_ident(self) -> Ident:
+        """ Parse an Identifier """
+        self.expect(Tokens.IDENT)
+        return Ident(self.cur.val)
+
+    def parse_node_ident(self) -> Ident:
+        """ Parse a Node-Identifier - either a var-name-style Ident or an Int. """
+        self.expect(Tokens.IDENT, Tokens.INT)
+        return Ident(str(self.cur.val))
+
+    def parse_list(self, parse_item, term, *, MAXN=10_000) -> List[Any]:
+        """ Parse a whitespace-separated list of entries possible by function `parse_item`. 
+        Terminated in the condition `term(self)`. """
+        rv = []
         for i in range(MAXN, -1, -1):
             if term(self):
                 break
-            self.expect(Tokens.IDENT, Tokens.INT)
-            pname = Ident(str(self.cur.val))
-            nodes.append(pname)
+            rv.append(parse_item())
         if i <= 0:  # Check whether the time-out triggered
             NetlistParseError.throw()
-        return nodes
+        return rv
+
+    def parse_node_list(self, term, *, MAXN=10_000) -> List[Ident]:
+        """ Parse a Node-Identifier (Ident or Int) list, 
+        terminated in the condition `term(self)`. """
+
+        return self.parse_list(self.parse_node_ident, term=term, MAXN=MAXN)
+
+    def parse_ident_list(self, term, *, MAXN=10_000) -> List[Ident]:
+        """ Parse list of Identifiers """
+
+        return self.parse_list(self.parse_ident, term=term, MAXN=MAXN)
 
     def parse_instance(self) -> Instance:
         """ iname (? port1 port2 port2 )? mname p1=param1 p2=param2 ... """
@@ -410,8 +456,7 @@ class LineParser:
                 or not s.nxt1
                 or s.nxt1.tp == Tokens.EQUALS
             )
-            conns = self.parse_node_list(term)
-
+            conns = self.parse_node_list(term) 
             # Grab the module name, at this point errantly in the `conns` list
             module = conns.pop()  # FIXME: check this matched `Ident` and not `Int`
 
@@ -420,48 +465,65 @@ class LineParser:
         # And create & return our instance
         return Instance(name=name, module=module, conns=conns, params=params)
 
-    def parse_param_declarations(self) -> List[ParamDecl]:
-        """ ( ident = expr ( dev/gauss = expr )? )* \n """
-        rv = []
-        # Set a (fairly artificial) "time-out" so we don't get stuck here
-        MAX_ARGS = 1000
-        for i in range(MAX_ARGS, -1, -1):
-            if self.nxt is None or self.match(Tokens.NEWLINE):
-                break
+    def parse_param_val(self) -> ParamVal:
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        self.expect(Tokens.EQUALS)
+        e = self.parse_expr()
+        return ParamVal(name, e)
 
-            self.expect(Tokens.IDENT)
-            name = Ident(self.cur.val)
+    def parse_param_declaration(self):
+        val = self.parse_param_val()
+        # FIXME: Skipping this auxiliary stuff for now
+        if self.match(Tokens.DEV_GAUSS):
             self.expect(Tokens.EQUALS)
-            e = self.parse_expr()
+            _e = self.parse_expr()
+        return ParamDecl(val.name, val.val)
 
-            if self.match(Tokens.DEV_GAUSS):
-                # FIXME: Skipping this auxiliary stuff for now
-                self.expect(Tokens.EQUALS)
-                e = self.parse_expr()
-            rv.append(ParamDecl(name, e))
+    def parse_param_declarations(self) -> List[ParamDecl]:
+        """ Parse a set of parameter declarations """
 
-        if i <= 0:  # Check whether the time-out triggered
-            NetlistParseError.throw()
-        return rv
+        # Parse an initial list of identifiers, i.e. non-default-valued parameters
+        term = (
+            lambda s: not s.nxt
+            or s.nxt.tp == Tokens.NEWLINE
+            or not s.nxt1
+            or s.nxt1.tp == Tokens.EQUALS
+        )
+        args = self.parse_ident_list(term)
+        args = [ParamDecl(a, None) for a in args]
+
+        # Parse the remaining key-valued ParamDecls
+        term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
+        kwargs = self.parse_list(self.parse_param_declaration, term=term)
+
+        return args + kwargs 
 
     def parse_param_values(self) -> List[ParamVal]:
         """ ( ident = expr )* """
-        rv = []
-        # Set a (fairly artificial) "time-out" so we don't get stuck here
-        MAX_ARGS = 10_000
-        for i in range(MAX_ARGS, -1, -1):
-            if self.nxt is None or self.match(Tokens.NEWLINE):
-                break
 
-            self.expect(Tokens.IDENT)
+        # Parse an initial list of identifiers, i.e. non-default-valued parameters
+        term = (
+            lambda s: not s.nxt
+            or s.nxt.tp == Tokens.NEWLINE
+            or not s.nxt1
+            or s.nxt1.tp == Tokens.EQUALS
+        )
+        args = self.parse_ident_list(term)
+        args = [ParamDecl(a, None) for a in args]
+
+        # Parse the remaining key-valued ParamVals
+        term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
+        return self.parse_list(self.parse_param_val, term=term) 
+
+    def parse_end_sub(self):
+        self.expect(Tokens.ENDS)
+        if self.match(Tokens.IDENT):
             name = Ident(self.cur.val)
-            self.expect(Tokens.EQUALS)
-            e = self.parse_expr()
-            rv.append(ParamVal(name, e))
-
-        if i <= 0:  # Check whether the time-out triggered
-            NetlistParseError.throw()
-        return rv
+        else:
+            name = None
+        self.expect(Tokens.NEWLINE)
+        return EndSubckt(name)
 
     def parse_expr(self) -> Expr:
         """ expr0 | 'expr0' | {expr0} """
@@ -496,9 +558,19 @@ class LineParser:
 
     def parse_expr2(self) -> Expr:
         """ expr3 ( (**|^) expr2 )? """
-        e = self.parse_expr3()
+        e = self.parse_expr2b()
         if self.match_any(Tokens.DUBSTAR, Tokens.CARET):
             return BinOp(tp=self.cur.tp, left=e, right=self.parse_expr2())
+        return e
+
+    def parse_expr2b(self) -> Expr:
+        """ expr3 ( ? expr3 : expr3 )? """
+        e = self.parse_expr3()
+        if self.match(Tokens.QUESTION):
+            if_true = self.parse_expr3()
+            self.expect(Tokens.COLON)
+            if_false = self.parse_expr3()
+            return TernOp(e, if_true, if_false)
         return e
 
     def parse_expr3(self) -> Expr:
