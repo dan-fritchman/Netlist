@@ -148,6 +148,7 @@ class Parser:
             for e in f.contents:
                 yield e
 
+
 def parse(path: os.PathLike, *, dialect=None) -> Program:
     """ Parse a Multi-File Netlist-Program """
     d = dialect or default_dialect(path)
@@ -385,14 +386,8 @@ class LineParser:
             ports = self.parse_node_list(term)
             self.expect(Tokens.RPAREN)
 
-        else:  # No-parens case
-            term = (
-                lambda s: not s.nxt
-                or s.nxt.tp == Tokens.NEWLINE
-                or not s.nxt1
-                or s.nxt1.tp == Tokens.EQUALS
-            )
-            ports = self.parse_node_list(term)
+        else:  # No-parens case 
+            ports = self.parse_node_list(_endargs_startkwargs)
 
         # Parse parameters
         params = self.parse_param_declarations()
@@ -425,13 +420,43 @@ class LineParser:
     def parse_node_list(self, term, *, MAXN=10_000) -> List[Ident]:
         """ Parse a Node-Identifier (Ident or Int) list, 
         terminated in the condition `term(self)`. """
-
         return self.parse_list(self.parse_node_ident, term=term, MAXN=MAXN)
 
     def parse_ident_list(self, term, *, MAXN=10_000) -> List[Ident]:
         """ Parse list of Identifiers """
-
         return self.parse_list(self.parse_ident, term=term, MAXN=MAXN)
+
+    def parse_expr_list(self, term, *, MAXN=10_000) -> List[Expr]:
+        """ Parse list of Expressions """
+        return self.parse_list(self.parse_expr, term=term, MAXN=MAXN)
+
+    def parse_primitive(self) -> Primitive:
+        """ Parse a Spice-format primitive instance """
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        args = []
+
+        # For Primitives it is not necessarily clear at parse-time which arguments
+        # are ports vs parameters. All are parsed as `Expr` and sorted out later.
+        if self.match(Tokens.LPAREN):
+
+            # Parse ports in parentheses
+            # In this case, we actually do know what's a port vs param.
+            # But both are still stored in `args`, for consistency with the alternate case.
+            term = lambda s: not s.nxt or s.nxt.tp in (Tokens.RPAREN, Tokens.NEWLINE)
+            args = self.parse_expr_list(term)
+            self.expect(Tokens.RPAREN)
+
+            # Now parse the positional parameters
+            args = self.parse_expr_list(_endargs_startkwargs)
+
+        else:  # No-parens case
+            args = self.parse_expr_list(_endargs_startkwargs)
+
+        # Parse parameters
+        params = self.parse_param_values()
+        # And create & return our instance
+        return Primitive(name=name, args=args, kwargs=params)
 
     def parse_instance(self) -> Instance:
         """ iname (? port1 port2 port2 )? mname p1=param1 p2=param2 ... """
@@ -449,14 +474,8 @@ class LineParser:
             self.expect(Tokens.IDENT)
             module = Ident(self.cur.val)
 
-        else:  # No-parens case
-            term = (
-                lambda s: not s.nxt
-                or s.nxt.tp == Tokens.NEWLINE
-                or not s.nxt1
-                or s.nxt1.tp == Tokens.EQUALS
-            )
-            conns = self.parse_node_list(term) 
+        else:  # No-parens case 
+            conns = self.parse_node_list(_endargs_startkwargs)
             # Grab the module name, at this point errantly in the `conns` list
             module = conns.pop()  # FIXME: check this matched `Ident` and not `Int`
 
@@ -484,37 +503,25 @@ class LineParser:
         """ Parse a set of parameter declarations """
 
         # Parse an initial list of identifiers, i.e. non-default-valued parameters
-        term = (
-            lambda s: not s.nxt
-            or s.nxt.tp == Tokens.NEWLINE
-            or not s.nxt1
-            or s.nxt1.tp == Tokens.EQUALS
-        )
-        args = self.parse_ident_list(term)
+        args = self.parse_ident_list(_endargs_startkwargs)
         args = [ParamDecl(a, None) for a in args]
 
         # Parse the remaining key-valued ParamDecls
         term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
         kwargs = self.parse_list(self.parse_param_declaration, term=term)
 
-        return args + kwargs 
+        return args + kwargs
 
     def parse_param_values(self) -> List[ParamVal]:
         """ ( ident = expr )* """
 
         # Parse an initial list of identifiers, i.e. non-default-valued parameters
-        term = (
-            lambda s: not s.nxt
-            or s.nxt.tp == Tokens.NEWLINE
-            or not s.nxt1
-            or s.nxt1.tp == Tokens.EQUALS
-        )
-        args = self.parse_ident_list(term)
+        args = self.parse_ident_list(_endargs_startkwargs)
         args = [ParamDecl(a, None) for a in args]
 
         # Parse the remaining key-valued ParamVals
         term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
-        return self.parse_list(self.parse_param_val, term=term) 
+        return self.parse_list(self.parse_param_val, term=term)
 
     def parse_end_sub(self):
         self.expect(Tokens.ENDS)
@@ -612,3 +619,16 @@ class LineParser:
             return name
         NetlistParseError.throw()
 
+
+def _endargs_startkwargs(s):
+    """ A fairly intractible test of where argument-lists end and key-valued keyword args being. 
+    e.g. 
+    a b c d=1 e=2 ... => d
+    a b c \n  => \n
+    a b c EOF => EOF
+    """
+    return (
+        s.nxt is None
+        or s.nxt.tp == Tokens.NEWLINE
+        or (s.nxt.tp == Tokens.IDENT and s.nxt1 and s.nxt1.tp == Tokens.EQUALS)
+    )

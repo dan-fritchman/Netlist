@@ -38,9 +38,9 @@ class SpiceDialect(Dialect):
         """ Statement Parser 
         Dispatches to type-specific parsers based on prioritized set of matching rules. """
 
-        # Mix this up in our new and old-style ways 
-        line = ''.join(lines)
-        oldline = lines[0].rstrip() + ' '.join(l[1:].rstrip() for l in lines[1:])
+        # Mix this up in our new and old-style ways
+        line = "".join(lines)
+        oldline = lines[0].rstrip() + " ".join(l[1:].rstrip() for l in lines[1:])
 
         # Comments get highest priority
         if lines[0].strip().startswith(self.COMMENT_CHAR):
@@ -85,18 +85,10 @@ class SpiceDialect(Dialect):
         if m is None:
             return None
 
-        return Primitive(name=Ident("FAKE"), args=[], kwargs=[]) # FIXME! 
-        exprs = m.group(1)
-        rest = txt.replace(exprs, "")
-        kwargs = self.parse_param_values(rest)
-        exprs = exprs.split()
-        name = Ident(exprs.pop(0))
-
         from .. import LineParser
 
-        args = [LineParser(s, self).parse() for s in exprs]
-        return Primitive(name, args, kwargs)
-
+        p = LineParser(txt, self)
+        return p.parse(p.parse_primitive)
 
     @classmethod
     def parse_subckt_end(cls, txt: str) -> EndSubckt:
@@ -111,23 +103,21 @@ class SpiceDialect(Dialect):
     def parse_subckt_start(self, line: str) -> Optional[StartSubckt]:
         m = re.match(r"\.subckt|\.SUBCKT", line)
         if m is None:
-            return None 
+            return None
 
-        txt = line.lstrip().lstrip(".subckt").lstrip(".SUBCKT")
+        txt = "subckt " + line.lstrip().lstrip(".subckt").lstrip(
+            ".SUBCKT"
+        )  # FIXME! this cheater Spectre-method here
 
         from .. import LineParser
 
-        p = LineParser("subckt " + txt, self) # FIXME! this cheater Spectre-method here 
-        return p.parse(p.parse_subckt_start) 
-
-    @classmethod
-    def parse_hier_path(cls, txt: str):
-        return HierPath([Ident(i) for i in txt.split(cls.HIER_PATH_SEP)])
+        p = LineParser(txt, self)
+        return p.parse(p.parse_subckt_start)
 
     def parse_model_def(self, line: str) -> Union[ModelDef, ModelVariant]:
-        return ModelDef(Ident("fake"), mtype=Ident("fakemodel"), args=[], params=[]) # FIXME !
-
-
+        return ModelDef(
+            Ident("fake"), mtype=Ident("fakemodel"), args=[], params=[]
+        )  # FIXME !
 
         txt = line.replace(".model", "").replace(".MODEL", "")
         spl = txt.split()
@@ -137,13 +127,18 @@ class SpiceDialect(Dialect):
         rest = " ".join(spl[2:])
         params = self.parse_param_declarations(rest)
 
-        # Split the name into potential variants 
-        namepath = fullname.split('.')
+        # Split the name into potential variants
+        namepath = fullname.split(".")
         if len(namepath) == 2:
-            return ModelVariant(model=Ident(namepath[0]), variant=Ident(namepath[1]), args=args, params=params) 
+            return ModelVariant(
+                model=Ident(namepath[0]),
+                variant=Ident(namepath[1]),
+                args=args,
+                params=params,
+            )
         elif len(namepath) == 1:
             return ModelDef(Ident(fullname), mtype, args, params)
-        NetlistParseError.throw() # Invalid Name 
+        NetlistParseError.throw()  # Invalid Name
 
     def parse_param_decls(self, line: str):
         txt = line.lower().replace(".param", "")

@@ -6,7 +6,7 @@
             "type": "python",
             "request": "launch",
             "module": "pytest",
-            "args": ["tests/test_site.py::test_spectre"]
+            "args": ["tests/test_site.py"]
         }
     ]
 }
