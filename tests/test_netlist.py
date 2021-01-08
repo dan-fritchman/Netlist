@@ -132,6 +132,12 @@ def test_instance():
         ],
     )
 
+    txt = """rend  (r1 ra) resistor r=rend *(1 + vc1_raw_end*(1 - exp(-abs(v(r2,r1))))   
+        +                            + vc2_raw_end*(1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1))))        )
+        +     + vc3_raw_end*(1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1))))       """
+    p = LineParser(txt, Dialect.from_enum(NetlistDialects.SPECTRE))
+    i = p.parse(p.parse_instance)
+
 
 def test_subckt_def():
     from netlist import LineParser, NetlistDialects, Dialect
@@ -146,12 +152,9 @@ def test_subckt_def():
         name=Ident(name="mymos"),
         ports=[Ident(name="d"), Ident(name="g"), Ident(name="s"), Ident(name="b")],
         params=[
-            ParamDecl(name=Ident(name="l"), default=Int(val=11),  distr=None),
+            ParamDecl(name=Ident(name="l"), default=Int(val=11), distr=None),
             ParamDecl(
-                name=Ident(name="w"),
-                default=Ident(name="global_w"),
-                
-                distr=None,
+                name=Ident(name="w"), default=Ident(name="global_w"), distr=None,
             ),
         ],
     )
@@ -196,46 +199,25 @@ def test_model_family():
                 args=[],
                 params=[
                     ParamDecl(
-                        name=Ident(name="type"),
-                        default=Ident(name="n"),
-                        
-                        distr=None,
+                        name=Ident(name="type"), default=Ident(name="n"), distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="lmin"),
-                        default=Float(val=1.0),
-                        
-                        distr=None,
+                        name=Ident(name="lmin"), default=Float(val=1.0), distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="lmax"),
-                        default=Float(val=2.0),
-                        
-                        distr=None,
+                        name=Ident(name="lmax"), default=Float(val=2.0), distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="wmin"),
-                        default=Float(val=1.2),
-                        
-                        distr=None,
+                        name=Ident(name="wmin"), default=Float(val=1.2), distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="wmax"),
-                        default=Float(val=1.4),
-                        
-                        distr=None,
+                        name=Ident(name="wmax"), default=Float(val=1.4), distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="level"),
-                        default=Int(val=999),
-                        
-                        distr=None,
+                        name=Ident(name="level"), default=Int(val=999), distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="tnom"),
-                        default=Int(val=30),
-                        
-                        distr=None,
+                        name=Ident(name="tnom"), default=Int(val=30), distr=None,
                     ),
                 ],
             ),
@@ -245,35 +227,16 @@ def test_model_family():
                 args=[],
                 params=[
                     ParamDecl(
-                        name=Ident(name="type"),
-                        default=Ident(name="n"),
-                        
-                        distr=None,
+                        name=Ident(name="type"), default=Ident(name="n"), distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="version"),
-                        default=Float(val=3.2),
-                        
-                        distr=None,
+                        name=Ident(name="version"), default=Float(val=3.2), distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="xj"),
-                        default=Float(val=1.2e-07),
-                        
-                        distr=None,
+                        name=Ident(name="xj"), default=Float(val=1.2e-07), distr=None,
                     ),
-                    ParamDecl(
-                        name=Ident(name="lln"),
-                        default=Int(val=1),
-                        
-                        distr=None,
-                    ),
-                    ParamDecl(
-                        name=Ident(name="lwn"),
-                        default=Int(val=1),
-                        
-                        distr=None,
-                    ),
+                    ParamDecl(name=Ident(name="lln"), default=Int(val=1), distr=None,),
+                    ParamDecl(name=Ident(name="lwn"), default=Int(val=1), distr=None,),
                 ],
             ),
         ],

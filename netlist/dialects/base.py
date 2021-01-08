@@ -27,8 +27,9 @@ class Dialect:
         self.parent = parent
 
     @classmethod
-    def is_continuation(cls, s: str) -> bool:
+    def is_continuation(cls, txt: str) -> bool:
         # Continuation-characters, comments, and blank-lines all manifest "continuation lines "
+        s = txt.lstrip()
         return (
             s.startswith(cls.CONTINUATION_CHAR)
             or cls.is_comment(s)
