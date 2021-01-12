@@ -1,156 +1,108 @@
 from ..data import *
-from .base import Dialect
+from .base import DialectParser, Tokens
 
 
-class SpiceDialect(Dialect):
+class SpiceDialectParser(DialectParser):
     """ Family of SPICE-like syntax dialects, complete with 
     * Dot-based "control cards", e.g. `.subckt`, `.ac`, `.end`, 
     * Prefix-based primitive element instances
     Further specializations are made for HSPICE, NGSPICE, etc. 
     """
 
-    HIER_PATH_SEP = "."
-    CONTINUATION_CHAR = "+"
-    COMMENT_CHAR = "*"
-
-    IDENT_START_RE = rf"[A-Za-z_]"  # Valid characters to start an identifier
-    IDENT_CONT_RE = rf"[A-Za-z0-9_]"  # Valid (non-start) characters in identifiers
-    IDENT_RE = rf"{IDENT_START_RE}{IDENT_CONT_RE}*"
-    IDENTS_LIST_RE = rf"\s*({IDENT_RE}\s+)+({IDENT_RE}(\s+|$))?"
-    HIER_IDENT_RE = rf"({IDENT_RE})(\.{IDENT_RE})*"
-    MODEL_NAME_RE = rf"({IDENT_RE})(\.([A-Za-z_0-9]*))?"  # E.g. `nmos`, `nmos.0`
-    NODE_NAME_RE = rf"([A-Za-z0-9_:]+)"  # Node names are much more foregiving. `i:`, `___`, `123`, etc are all valid
-
-    EXPR_RE = r"([^=]+\n|[^\s=]+|'[^=]+'|{[^=]+})"  # Parameter expression, inside or outside bracketing
-    EXPR_LIST_RE = rf"({EXPR_RE})(\s+{EXPR_RE})*"  # FIXME: (\s+|$)
-    UNITS_RE = rf"$([.*])\n"
-    PARAM_SET_RE = rf"({IDENT_RE})\s*\=\s*({EXPR_RE})"  ## FIXME: units ## (\s*|({UNITS_RE})?)' # Form a=5 b=6 c=7
-    PARAM_KWARGS_RE = rf"({PARAM_SET_RE})(\s+{PARAM_SET_RE})*"
-
-    IDENTS_AND_PARAMS_RE = rf"({IDENTS_LIST_RE})({PARAM_KWARGS_RE})?"  # Form: name arg1 arg2 arg3 a=3 b=4 c=5
-    PARAMS_ARG_AND_KWARG_RE = rf"({EXPR_LIST_RE})\s+({PARAM_KWARGS_RE})?"  # Form: 'expr' 'expr1*expr2' '1e-9' a=3 b='16-11' c=0
-
-    MODEL_DEF_RE = rf"(.model|.MODEL)\s+({MODEL_NAME_RE})\s+({IDENTS_AND_PARAMS_RE})"
-    SUBCKT_START_RE = rf"(.subckt|.SUBCKT)\s+({IDENTS_AND_PARAMS_RE})"
-    SUBCKT_END_RE = rf"(.ends|.ENDS)(\s+{IDENT_RE}\s*)?"
-
-    def parse_stmt(self, lines: List[str]):
+    def parse_statement(self) -> Optional[Statement]:
         """ Statement Parser 
-        Dispatches to type-specific parsers based on prioritized set of matching rules. """
+        Dispatches to type-specific parsers based on prioritized set of matching rules. 
+        Returns `None` at end. """
 
-        # Mix this up in our new and old-style ways
-        line = "".join(lines)
-        oldline = lines[0].rstrip() + " ".join(l[1:].rstrip() for l in lines[1:])
+        self.eat_blanks()
+        pk = self.peek()
 
-        # Comments get highest priority
-        if lines[0].strip().startswith(self.COMMENT_CHAR):
-            return self.parse_comment(line)
-
-        # In-progress porting to `Optional[Statement]` return type,
-        # Where `None` indicates no-match
-        rules = [
-            lambda l: self.parse_primitive(oldline),
-            self.parse_instance,
-            self.parse_subckt_start,
-            self.parse_subckt_end,
-        ]
-        for rule in rules:
-            s = rule(line)
-            if s is not None:
-                return s
-
-        # More-manual, even-older-school rules
-        lc = line.lower()
-        if lc.startswith(".model"):
-            return self.parse_model_def(oldline)
-        if lc.startswith(".param"):
-            return self.parse_param_decls(line)
-        if lc.startswith(".inc"):
-            return self.parse_inc(oldline)
-        if lc.startswith(".option"):
-            return self.parse_options(oldline)
-        if lc.startswith(".lib"):
-            return self.parse_dot_lib(oldline)
-        NetlistParseError.throw(f"Invalid Statement: {line}")
-
-    PRIMITIVE_LEFT_RE = rf"[RrCcIiVvDdMmQq]{IDENT_CONT_RE}+\s+"
-    # PRIMITIVE_LEFT_RE = rf"([RrCcIiVvDdMmQq]{IDENT_CONT_RE}+\s+{EXPR_LIST_RE})"
-    # PRIMITIVE_RE = rf"({PRIMITIVE_LEFT_RE})(\s+{PARAM_KWARGS_RE})?\s*$"
-
-    INSTANCE_RE = rf"[Xx]{IDENT_CONT_RE}+"
-
-    def parse_primitive(self, txt: str) -> Optional[Primitive]:
-        """ Parse a Primitive Instance """
-        m = re.match(re.compile(self.PRIMITIVE_LEFT_RE), txt)
-        if m is None:
+        if pk is None:  # End-of-input case
             return None
 
-        from .. import LineParser
+        if self.match(Tokens.DOT):  # Control Statements
+            rules = {
+                Tokens.PARAM: self.parse_param_statement,
+                Tokens.SUBCKT: self.parse_subckt_start,
+                Tokens.ENDS: self.parse_end_sub,
+                Tokens.MODEL: self.parse_model,
+                Tokens.OPTION: self.parse_options,
+                Tokens.INC: self.parse_include,
+                Tokens.INCLUDE: self.parse_include,
+            }
+            pk = self.peek()
+            for tok, func in rules.items():
+                if pk.tp == tok:
+                    return func()
 
-        p = LineParser(txt, self)
-        return p.parse(p.parse_primitive)
+        elif pk.tp == Tokens.IDENT:
+            if pk.val.lower().startswith("x"):
+                return self.parse_instance()
+            return self.parse_primitive()
 
-    @classmethod
-    def parse_subckt_end(cls, txt: str) -> EndSubckt:
-        m = re.match(r"\.ends|\.ENDS", txt)
-        if m is None:
-            return None
+        # No match - error time.
+        NetlistParseError.throw()
 
-        name = txt.replace(".ends", "").replace(".ENDS", "").strip()
-        ident = None if not name else name
-        return EndSubckt(Ident(ident))
+    def parse_include(self) -> Include:
+        """ Parse an Include Statement """
+        self.expect(Tokens.INC, Tokens.INCLUDE)
+        self.expect(Tokens.QUOTESTR)
+        path = self.cur.val[1:-1]  # Strip out the quotes
+        self.expect(Tokens.NEWLINE)
+        return Include(path)
 
-    def parse_subckt_start(self, line: str) -> Optional[StartSubckt]:
-        m = re.match(r"\.subckt|\.SUBCKT", line)
-        if m is None:
-            return None
+    def parse_param_statement(self) -> ParamDecls:
+        """ Parse a Parameter-Declaration Statement """
+        self.expect(Tokens.PARAM)
+        vals = self.parse_param_declarations()  # NEWLINE is captured inside
+        return ParamDecls(vals)
 
-        txt = "subckt " + line.lstrip().lstrip(".subckt").lstrip(
-            ".SUBCKT"
-        )  # FIXME! this cheater Spectre-method here
+    def parse_model(self) -> Union[ModelDef, ModelVariant]:
+        """ Parse SPICE .model Statements """
+        from .base import _endargs_startkwargs
 
-        from .. import LineParser
+        self.expect(Tokens.MODEL)
 
-        p = LineParser(txt, self)
-        return p.parse(p.parse_subckt_start)
+        if self.match(Tokens.MODEL_VARIANT):  # `model.variant` ModelVariant form
+            spl = self.cur.val.split(".")
+            if len(spl) != 2:
+                NetlistParseError.throw()
+            mname = Ident(spl[0])
+            variant = Ident(str(spl[1]))
+            self.expect(Tokens.IDENT)  # FIXME: is this defined here or elsewhere?
+            mtype = Ident(self.cur.val)  # FIXME: Not stored, at least for now
 
-    def parse_model_def(self, line: str) -> Union[ModelDef, ModelVariant]:
-        return ModelDef(
-            Ident("fake"), mtype=Ident("fakemodel"), args=[], params=[]
-        )  # FIXME !
+            args = self.parse_ident_list(_endargs_startkwargs)
+            # If we landed on a key-value param key, rewind it
+            if self.nxt and self.nxt.tp == Tokens.EQUALS:
+                self.rewind()
+                args.pop()
+            params = self.parse_param_declarations()
+            return ModelVariant(mname, variant, args, params)
 
-        txt = line.replace(".model", "").replace(".MODEL", "")
-        spl = txt.split()
-        fullname = spl[0].strip()
-        mtype = Ident(spl[1].strip())
-        args = [Ident(s.strip()) for s in spl[2:]]
-        rest = " ".join(spl[2:])
-        params = self.parse_param_declarations(rest)
+        # Single ModelDef
+        self.expect(Tokens.IDENT)
+        mname = Ident(self.cur.val)
+        self.expect(Tokens.IDENT)
+        mtype = Ident(self.cur.val)
+        args = self.parse_ident_list(_endargs_startkwargs)
+        # If we landed on a key-value param key, rewind it
+        if self.nxt and self.nxt.tp == Tokens.EQUALS:
+            self.rewind()
+            args.pop()
+        params = self.parse_param_declarations()
+        return ModelDef(mname, mtype, args, params)
+        # return ModelDef(
+        #     Ident("fake"), mtype=Ident("fakemodel"), args, params
+        # )  # FIXME !
 
-        # Split the name into potential variants
-        namepath = fullname.split(".")
-        if len(namepath) == 2:
-            return ModelVariant(
-                model=Ident(namepath[0]),
-                variant=Ident(namepath[1]),
-                args=args,
-                params=params,
-            )
-        elif len(namepath) == 1:
-            return ModelDef(Ident(fullname), mtype, args, params)
-        NetlistParseError.throw()  # Invalid Name
-
-    def parse_param_decls(self, line: str):
-        txt = line.lower().replace(".param", "")
-        return ParamDecls(self.parse_param_declarations(txt))
-
-    def parse_options(self, line: str):
-        txt = line.lower().replace(".option", "")
-        vals = self.parse_param_values(txt)
+    def parse_options(self):
+        self.match(Tokens.OPTION)
+        vals = self.parse_param_values()
+        self.match(Tokens.NEWLINE)
         return Options(vals)
 
-    @classmethod
-    def parse_dot_lib(cls, line: str):
+    def parse_dot_lib(self):
         """ Parse a line beginning with `.lib`, which may be *defining* or *using* the library! """
         parts = line.split()
         if parts[0].lower() != ".lib":
@@ -161,8 +113,7 @@ class SpiceDialect(Dialect):
             return UseLib(path=Path(parts[1], section=Ident(parts[2])))
         NetlistParseError.throw()
 
-    @classmethod
-    def parse_inc(cls, line: str):
+    def parse_inc(self):
         txt = line.replace(".include", "").replace(".inc", "").strip()
         if txt.startswith('"'):
             if txt.endswith('"'):
@@ -176,12 +127,12 @@ class SpiceDialect(Dialect):
                 NetlistParseError.throw("Unclosed String")
         return Include(Path(txt))
 
-    @classmethod
-    def parse_comment(cls, line: str):
-        return Comment(line.strip().lstrip(cls.COMMENT_CHAR))
+    def are_stars_comments_now(self) -> bool:
+        from .base import ParserState
+        return self.state != ParserState.EXPR
 
 
-class NgSpiceDialect(SpiceDialect):
+class NgSpiceDialectParser(SpiceDialectParser):
     # FIXME: actually specialize!
     enum = NetlistDialects.NGSPICE
 

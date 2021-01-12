@@ -1,3 +1,3 @@
-from .base import Dialect 
-from .spice import SpiceDialect, NgSpiceDialect
-from .spectre import SpectreDialect, SpectreSpiceDialect
+from .base import DialectParser
+from .spice import SpiceDialectParser, NgSpiceDialectParser
+from .spectre import SpectreDialectParser, SpectreSpiceDialectParser

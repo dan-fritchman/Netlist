@@ -6,7 +6,7 @@ def test_version():
 
 def test_exprs():
     from netlist import (
-        LineParser,
+        SpectreDialectParser,
         Int,
         Float,
         MetricNum,
@@ -16,8 +16,12 @@ def test_exprs():
         Call,
     )
 
-    def parse_expression(s: str) -> LineParser:
-        parser = LineParser(s)
+    def parse_expression(s: str) -> SpectreDialectParser:
+        """ Parse a string expression """
+        from netlist.dialects.base import ParserState
+
+        parser = SpectreDialectParser.from_str(s)
+        parser.state = ParserState.EXPR
         return parser.parse(parser.parse_expr)
 
     p = parse_expression("1")
@@ -113,14 +117,63 @@ def test_param_values():
     )
 
 
+def test_primitive():
+    from netlist import SpiceDialectParser
+    from netlist.data import Ident, BinOp, Primitive, Float, Int, ParamVal 
+
+    txt = """ r1 1 0
++ fun_param='((0.5*(x-2*y))+z)/(2*(a-2*b))'
+* A mid-stream line comment
++ funner_param=11e-21
+"""
+    p = SpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_primitive)
+    assert i == Primitive(
+        name=Ident(name="r1"),
+        args=[Int(val=1), Int(val=0)],
+        kwargs=[
+            ParamVal(
+                name=Ident(name="fun_param"),
+                val=BinOp(
+                    tp="SLASH",
+                    left=BinOp(
+                        tp="PLUS",
+                        left=BinOp(
+                            tp="STAR",
+                            left=Float(val=0.5),
+                            right=BinOp(
+                                tp="MINUS",
+                                left=Ident(name="x"),
+                                right=BinOp(
+                                    tp="STAR", left=Int(val=2), right=Ident(name="y")
+                                ),
+                            ),
+                        ),
+                        right=Ident(name="z"),
+                    ),
+                    right=BinOp(
+                        tp="STAR",
+                        left=Int(val=2),
+                        right=BinOp(
+                            tp="MINUS",
+                            left=Ident(name="a"),
+                            right=BinOp(
+                                tp="STAR", left=Int(val=2), right=Ident(name="b")
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            ParamVal(name=Ident(name="funner_param"), val=Float(val=1.1e-20)),
+        ],
+    )
+
+
 def test_instance():
-    from netlist import LineParser, NetlistDialects, Dialect
+    from netlist import SpectreDialectParser
     from netlist import Ident, ParamVal, Int, Instance
 
-    p = LineParser(
-        "xxx (d g s b) mymos l=11 w=global_w",
-        Dialect.from_enum(NetlistDialects.SPECTRE),
-    )
+    p = SpectreDialectParser.from_str("xxx (d g s b) mymos l=11 w=global_w",)
     i = p.parse(p.parse_instance)
     assert i == Instance(
         name=Ident(name="xxx"),
@@ -134,19 +187,16 @@ def test_instance():
 
     txt = """rend  (r1 ra) resistor r=rend *(1 + vc1_raw_end*(1 - exp(-abs(v(r2,r1))))   
         +                            + vc2_raw_end*(1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1))))        )
-        +     + vc3_raw_end*(1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1))))       """ # The question: adding these ((( 
-    p = LineParser(txt, Dialect.from_enum(NetlistDialects.SPECTRE))
+        +     + vc3_raw_end*(1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1))))       """  # The question: adding these (((
+    p = SpectreDialectParser.from_str(txt)
     i = p.parse(p.parse_instance)
 
 
 def test_subckt_def():
-    from netlist import LineParser, NetlistDialects, Dialect
+    from netlist import SpectreDialectParser
     from netlist import Ident, ParamDecl, Int, StartSubckt
 
-    p = LineParser(
-        "subckt mymos (d g s b) l=11 w=global_w",
-        Dialect.from_enum(NetlistDialects.SPECTRE),
-    )
+    p = SpectreDialectParser.from_str("subckt mymos (d g s b) l=11 w=global_w")
     i = p.parse(p.parse_subckt_start)
     assert i == StartSubckt(
         name=Ident(name="mymos"),
@@ -184,10 +234,10 @@ def test_model_family():
 }
 """
 
-    from netlist import LineParser, NetlistDialects, Dialect
+    from netlist import SpectreDialectParser
     from netlist import Ident, ParamDecl, Int, Float, ModelVariant, ModelFamily
 
-    p = LineParser(txt, Dialect.from_enum(NetlistDialects.SPECTRE),)
+    p = SpectreDialectParser.from_str(txt)
     i = p.parse(p.parse_model)
     assert i == ModelFamily(
         name=Ident(name="npd_model"),
