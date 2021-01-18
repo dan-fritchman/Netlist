@@ -178,7 +178,7 @@ class Variation:
 
     name: Ident
     dist: str
-    std: 'Expr'
+    std: "Expr"
 
 
 @dataclass
