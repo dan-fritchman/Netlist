@@ -73,6 +73,29 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         # No match - error time.
         NetlistParseError.throw()
 
+    def parse_model(self) -> Union[ModelDef, ModelFamily]:
+        """ Parse a Model statement """
+        self.expect(Tokens.MODEL)
+        self.expect(Tokens.IDENT)
+        mname = Ident(self.cur.val)
+        self.expect(Tokens.IDENT)
+        mtype = Ident(self.cur.val)
+        if self.match(Tokens.LBRACKET):
+            self.expect(Tokens.NEWLINE)
+            # Multi-Variant Model Family
+            vars = []
+            while not self.match(Tokens.RBRACKET):
+                self.expect(Tokens.IDENT, Tokens.INT)
+                vname = Ident(str(self.cur.val))
+                self.expect(Tokens.COLON)
+                params = self.parse_param_declarations()
+                vars.append(ModelVariant(mname, vname, [], params))
+            self.expect(Tokens.NEWLINE)
+            return ModelFamily(mname, mtype, vars)
+        # Single ModelDef
+        params = self.parse_param_declarations()
+        return ModelDef(mname, mtype, [], params)
+    
     def parse_param_statement(self) -> ParamDecls:
         """ Parse a Parameter-Declaration Statement """
         from .base import _endargs_startkwargs
@@ -178,6 +201,11 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
     def are_stars_comments_now(self) -> bool:
         # Stars are comments only to begin lines. (We think?)
         return self.cur and self.cur.tp == Tokens.NEWLINE
+
+    def parse_expr(self) -> Expr:
+        """ Parse an Expression """ 
+        # No parameter-literal characters; defer to base-class `expr0`. 
+        return self.parse_expr0()
 
     def parse_options(self):
         raise NotImplementedError

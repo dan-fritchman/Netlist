@@ -1,7 +1,22 @@
+import os
+from pathlib import Path
 from warnings import warn
-from .data import NetlistDialects, NetlistParseError, Unknown
-from .data import *
+from typing import List
+
 from .dialects import DialectParser
+from .data import (
+    NetlistDialects,
+    NetlistParseError,
+    ValidationError,
+    Entry,
+    DialectChange,
+    Unknown,
+    SourceInfo,
+    SourceFile,
+    Program,
+    Include,
+    UseLib,
+)
 
 
 def default_dialect(path: os.PathLike) -> NetlistDialects:
@@ -38,51 +53,50 @@ class FileParser:
 
         dcls = DialectParser.from_enum(dialect)
         self.dialect_parser = dcls.from_parser(self.dialect_parser)
- 
-    def _parse_file(self):
-        """ Parse the (open) file-pointer at `self.fp` """
-        entries = []
-        self.line_num = start_line_num = 1
 
-        si = SourceInfo(  # FIXME: line numbers temp disabled
-            path=self.path, line=start_line_num, dialect=self.dialect_parser.enum,
-        )
-        s = True 
-        while s:
-            try:  # Collected a statement, parse it
+    def _parse_file(self) -> List[Entry]:
+        """ Parse the (open) file-pointer at `self.fp` """
+        # Create our iterator over file-lines, and core dialect-parser
+        lines = iter(self.fp.readline, None)
+        dcls = DialectParser.from_enum(self.dialect)
+        self.dialect_parser = dcls.from_lines(lines=lines, parent=self)
+        self.dialect_parser.start()
+
+        entries = []
+        s = True
+        while s:  # Main loop over statements
+            si = SourceInfo(
+                line=self.dialect_parser.line_num, dialect=self.dialect_parser.enum,
+            )
+            try:  # Catch errors in primary parsing routines
                 s = self.dialect_parser.parse_statement()
-                if s is not None: # None-value indicates EOF 
-                    e = Entry(s, si)
-                    entries.append(e)
             except (NetlistParseError, ValidationError) as e:
+                # Error Handling.
+                # Can either include `Unknown` statements, or re-raise.
                 warn(e)
-                e = Entry(Unknown(">>> ??? <<<"), si)
-                entries.append(e)
+                s = Unknown("")
                 self.dialect_parser.eat_rest_of_statement()
                 # NetlistParseError.throw(
                 #     f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{lines} "
                 # )
-            # s = self.dialect_parser.parse_statement()
+            if s is not None:  # None-value indicates EOF
+                e = Entry(s, si)
+                entries.append(e)
 
         return entries
- 
-    def parse(self, path: Path) -> SourceFile:
 
+    def parse(self, path: Path) -> SourceFile:
+        """ Parse the netlist `SourceFile` at `path`. """
         with open(path, "r") as f:
             self.path = path
             self.fp = f
-            # Create our iterator over file-lines 
-            lines = iter(self.fp.readline, None)
-            # Create and start our core parser 
-            dcls = DialectParser.from_enum(self.dialect)
-            self.dialect_parser = dcls.from_lines(lines=lines, parent=self)
-            self.dialect_parser.start()
             entries = self._parse_file()
-
         return SourceFile(path, entries)
 
 
 class Parser:
+    """ Multi-File "Netlist Program" Parser """
+
     def __init__(self, dialect: NetlistDialects):
         self.deps: List[Path] = []
         self.program = Program([])

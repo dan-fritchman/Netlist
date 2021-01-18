@@ -4,7 +4,31 @@ def test_version():
     assert __version__ == "0.1.0"
 
 
-def test_exprs():
+def test_spice_exprs():
+    from netlist import (
+        SpiceDialectParser,
+        Int,
+        Float,
+        MetricNum,
+        UnOp,
+        BinOp,
+        Ident,
+        Call,
+    )
+
+    def parse_expression(s: str) -> SpiceDialectParser:
+        """ Parse a string expression """
+        from netlist.dialects.base import ParserState
+
+        parser = SpiceDialectParser.from_str(s)
+        parser.state = ParserState.EXPR
+        return parser.parse(parser.parse_expr)
+
+    p = parse_expression(" ' a + b ' ")  # SPICE-style ticked-expression
+    assert p == BinOp(tp="PLUS", left=Ident(name="a"), right=Ident(name="b"))
+
+
+def test_spectre_exprs():
     from netlist import (
         SpectreDialectParser,
         Int,
@@ -65,9 +89,6 @@ def test_exprs():
 
     p = parse_expression("(0.5f * p)")  # SPICE metric-suffixed number
     assert p == BinOp(tp="STAR", left=MetricNum(val="0.5f"), right=Ident(name="p"))
-
-    p = parse_expression(" ' a + b ' ")  # SPICE-style ticked-expression
-    assert p == BinOp(tp="PLUS", left=Ident(name="a"), right=Ident(name="b"))
 
     p = parse_expression(" a + func(b, c) ")  # Function call
     assert p == BinOp(

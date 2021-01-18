@@ -92,9 +92,6 @@ class SpiceDialectParser(DialectParser):
             args.pop()
         params = self.parse_param_declarations()
         return ModelDef(mname, mtype, args, params)
-        # return ModelDef(
-        #     Ident("fake"), mtype=Ident("fakemodel"), args, params
-        # )  # FIXME !
 
     def parse_options(self):
         self.match(Tokens.OPTION)
@@ -129,7 +126,31 @@ class SpiceDialectParser(DialectParser):
 
     def are_stars_comments_now(self) -> bool:
         from .base import ParserState
+
         return self.state != ParserState.EXPR
+
+    def parse_expr(self) -> Expr:
+        """ Parse an Expression 
+        expr0 | 'expr0' | {expr0} """
+        # Note: moves into our `EXPR` state require a `peek`/`expect` combo,
+        # otherwise we can mis-understand multiplication vs comment.
+        from .base import ParserState
+
+        if self.nxt and self.nxt.tp == Tokens.TICK:
+            self.state = ParserState.EXPR  # Note: this comes first
+            self.expect(Tokens.TICK)
+            e = self.parse_expr0()
+            self.state = ParserState.PROGRAM  # Note: this comes first
+            self.expect(Tokens.TICK)
+            return e
+        if self.nxt and self.nxt.tp == Tokens.LBRACKET:
+            self.state = ParserState.EXPR  # Note: this comes first
+            self.expect(Tokens.LBRACKET)
+            e = self.parse_expr0()
+            self.state = ParserState.PROGRAM  # Note: this comes first
+            self.expect(Tokens.RBRACKET)
+            return e
+        return self.parse_expr0()
 
 
 class NgSpiceDialectParser(SpiceDialectParser):

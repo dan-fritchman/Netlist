@@ -91,6 +91,7 @@ class Lexer:
         self.parser = None
         self.lines = lines
         self.line = next(self.lines, None)
+        self.line_num = 1
         self.toks = iter(pat.scanner(self.line).match, None)
 
     def nxt(self) -> Optional[Token]:
@@ -100,6 +101,7 @@ class Lexer:
             self.line = next(self.lines, None)
             if self.line is None:  # End of input
                 return None
+            self.line_num += 1
             self.toks = iter(pat.scanner(self.line).match, None)
             m = next(self.toks, None)
             if m is None:
@@ -152,9 +154,9 @@ class ParserState(Enum):
 
 
 class DialectParser:
+    """ Netlist Dialect-Parsing Base-Class """
 
     enum = None
-    INSTANCE_RE = None
 
     def __init__(self, lex: Lexer, parent: Optional["FileParser"] = None):
         self.parent = parent
@@ -169,6 +171,10 @@ class DialectParser:
         # Initialize our lexer and its token-generator
         self.lex = lex
         self.lex.parser = self
+
+    @property
+    def line_num(self):
+        return self.lex.line_num
 
     @classmethod
     def from_parser(cls, p: "DialectParser") -> "DialectParser":
@@ -213,9 +219,6 @@ class DialectParser:
             return NgSpiceDialectParser
         raise ValueError
 
-    def is_comment(self, tok: Token) -> bool:
-        raise NotImplementedError
-
     def eat_blanks(self):
         """ Pass over blank-lines, generally created by full-line comments. """
         while self.nxt and self.nxt.tp == Tokens.NEWLINE:
@@ -226,20 +229,6 @@ class DialectParser:
         Largely used for error purposes. """
         while self.nxt and not self.match(Tokens.NEWLINE):
             self.advance()
-
-    """
-    BIG GAP HERE WHILE MERGING  
-    """
-
-    def are_stars_comments_now(self) -> bool:
-        """ Boolean indication of whether Tokens.STAR and DUBSTAR should 
-        currently be lexed as a comment. """
-        raise NotImplementedError
-
-    def is_comment(self, tok: Token) -> bool:
-        return tok.tp in (Tokens.DUBSLASH, Tokens.DOLLAR,) or (
-            self.are_stars_comments_now() and tok.tp in (Tokens.DUBSTAR, Tokens.STAR)
-        )
 
     def start(self) -> None:
         # Initialize our token generator
@@ -301,32 +290,8 @@ class DialectParser:
             NetlistParseError.throw()
         return self.root
 
-    def parse_model(self) -> Union[ModelDef, ModelFamily]:
-        """ Parse a (Spectre-format, for now) Model statement """
-        self.expect(Tokens.MODEL)
-        self.expect(Tokens.IDENT)
-        mname = Ident(self.cur.val)
-        self.expect(Tokens.IDENT)
-        mtype = Ident(self.cur.val)
-        if self.match(Tokens.LBRACKET):
-            self.expect(Tokens.NEWLINE)
-            # Multi-Variant Model Family
-            vars = []
-            while not self.match(Tokens.RBRACKET):
-                self.expect(Tokens.IDENT, Tokens.INT)
-                vname = Ident(str(self.cur.val))
-                self.expect(Tokens.COLON)
-                params = self.parse_param_declarations()
-                vars.append(ModelVariant(mname, vname, [], params))
-            self.expect(Tokens.NEWLINE)
-            return ModelFamily(mname, mtype, vars)
-        # Single ModelDef
-        params = self.parse_param_declarations()
-        return ModelDef(mname, mtype, [], params)
-
     def parse_subckt_start(self) -> StartSubckt:
-        """ module_name ( port1 port2 port2 ) p1=param1 p2=param2 ... 
-        FIXME: spectre-only for now! """
+        """ module_name ( port1 port2 port2 ) p1=param1 p2=param2 ... """
 
         # Boolean indication of the `inline`-ness
         _inline = self.match(Tokens.INLINE)
@@ -415,8 +380,6 @@ class DialectParser:
             # If we landed on a key-value param key, rewind it
             if self.nxt and self.nxt.tp == Tokens.EQUALS:
                 self.rewind()
-                if not len(args):
-                    print(5)
                 args.pop()
 
         # Parse parameters
@@ -447,8 +410,6 @@ class DialectParser:
                 self.rewind()
                 conns.pop()
             # Grab the module name, at this point errantly in the `conns` list
-            if not len(conns):
-                print(5)
             module = conns.pop()  # FIXME: check this matched `Ident` and not `Int`
 
         # Parse parameters
@@ -493,27 +454,6 @@ class DialectParser:
             name = None
         self.expect(Tokens.NEWLINE)
         return EndSubckt(name)
-
-    def parse_expr(self) -> Expr:
-        """ expr0 | 'expr0' | {expr0} """
-        # FIXME: the ticks vs brackets syntax will become a Dialect-specific thing
-        # The moves into our `EXPR` state require a `peek`/`expect` combo,
-        # otherwise we can mis-understand multiplication vs comment.
-        if self.nxt and self.nxt.tp == Tokens.TICK:
-            self.state = ParserState.EXPR  # Note: this comes first
-            self.expect(Tokens.TICK)
-            e = self.parse_expr0()
-            self.state = ParserState.PROGRAM  # Note: this comes first
-            self.expect(Tokens.TICK)
-            return e
-        if self.nxt and self.nxt.tp == Tokens.LBRACKET:
-            self.state = ParserState.EXPR  # Note: this comes first
-            self.expect(Tokens.LBRACKET)
-            e = self.parse_expr0()
-            self.state = ParserState.PROGRAM  # Note: this comes first
-            self.expect(Tokens.RBRACKET)
-            return e
-        return self.parse_expr0()
 
     def parse_expr0(self) -> Expr:
         """ expr0b ( (<|>|<=|>=) expr0b )? """
@@ -598,10 +538,31 @@ class DialectParser:
             return name
         NetlistParseError.throw()
 
+    def is_comment(self, tok: Token) -> bool:
+        """ Boolean indication of whether `tok` begins a Comment """
+        return tok.tp in (Tokens.DUBSLASH, Tokens.DOLLAR,) or (
+            self.are_stars_comments_now() and tok.tp in (Tokens.DUBSTAR, Tokens.STAR)
+        )
+
+    """ Abstract Methods """
+
+    def are_stars_comments_now(self) -> bool:
+        """ Boolean indication of whether Tokens.STAR and DUBSTAR should 
+        currently be lexed as a comment. """
+        raise NotImplementedError
+
     def parse_statement(self) -> Optional[Statement]:
         """ Statement Parser 
         Dispatches to type-specific parsers based on prioritized set of matching rules. 
         Returns `None` at end. """
+        raise NotImplementedError
+
+    def parse_expr(self) -> Expr:
+        """ Parse an Expression """
+        raise NotImplementedError
+
+    def parse_model(self) -> Expr:
+        """ Parse a Model Declaration """
         raise NotImplementedError
 
 

@@ -34,7 +34,8 @@ def to_json(arg) -> str:
 
 @dataclass
 class SourceInfo:
-    path: Path
+    """ Per-Statement Source Information """
+
     line: int
     dialect: "NetlistDialects"
 
@@ -54,7 +55,7 @@ class HierPath:
 @dataclass(eq=True, frozen=True)
 class ParamDecl:
     """ Parameter Declaration 
-    Includes Optional Distribution & Unit Information """
+    Includes Optional Distribution Information """
 
     name: Ident
     default: Optional["Expr"]
