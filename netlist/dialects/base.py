@@ -22,7 +22,7 @@ suffixes = dict(
 suffix_pattern = "|".join(list(suffixes.keys()) + [k.lower() for k in suffixes.keys()])
 
 # Master mapping of tokens <=> patterns
-tokens = dict(
+_patterns1 = dict(
     DUBSLASH=r"\/\/",
     DUBSTAR=r"\*\*",
     LPAREN=r"\(",
@@ -37,27 +37,32 @@ tokens = dict(
     TICK=r"\'",
     COMMA=r"\,",
     COLON=r"\:",
-    GT=r"\>",
-    LT=r"\<",
     GE=r"\>\=",
     LE=r"\<\=",
+    GT=r"\>",
+    LT=r"\<",
     EQUALS=r"\=",
     DOLLAR=r"\$",
     QUESTION=r"\?",
     QUOTESTR=r"\".*\"",
-    MODEL_VARIANT=r"[A-Za-z_][A-Za-z0-9_]*\.\d+",
+    MODEL_VARIANT=r"[A-Za-z_][A-Za-z0-9_]*\.\d+", # nmos.0, mymodel.3, etc
     METRIC_NUM=rf"(\d+(\.\d+)?|\.\d+)({suffix_pattern})",  # 1M or 1.0f or .1k
     FLOAT=r"(\d+[eE][+-]?\d+|(\d+\.\d*|\.\d+)([eE][+-]?\d+)?)",  # 1e3 or 1.0 or .1 (optional e-3)
     INT=r"\d+",
     PLUS=r"\+",
     MINUS=r"\-",
     DOT=r"\.",
+)
+_keywords = dict(
+    ENDSECTION=r"endsection",
+    SECTION=r"section",
     AHDL=r"ahdl_include",
     INCLUDE=r"include",
     INC=r"inc",
     INLINE=r"inline",
     SUBCKT=r"subckt",
     ENDS=r"ends",
+    LIBRARY=r"library",
     LIB=r"lib",
     ENDL=r"endl",
     MODEL=r"model",
@@ -69,11 +74,19 @@ tokens = dict(
     OPTIONS=r"options",
     OPTION=r"option",
     DEV_GAUSS=r"dev\/gauss",  # Perhaps there are more "dev/{x}" to be added; gauss is the known one for now.
+)
+_patterns2 = dict(
     IDENT=r"[A-Za-z_][A-Za-z0-9_]*",
     ERROR=r"[\s\S]",
 )
 # Given each token its name as a key in the overall regex
-tokens = {key: rf"(?P<{key}>{val})" for key, val in tokens.items()}
+tokens = {key: rf"(?P<{key}>{val})" for key, val in _patterns1.items()}
+for key, val in _keywords.items():
+    # Insert \b word-boundaries around keywords 
+    tokens[key] = rf"(?P<{key}>\b{val}\b)"
+for key, val in _patterns2.items():
+    # Add the lower-priority patterns last 
+    tokens[key] = rf"(?P<{key}>{val})"
 # Build our overall regex pattern, a union of all
 pat = re.compile("|".join(tokens.values()))
 # Create an enum-ish class of these token-types
@@ -408,6 +421,8 @@ class DialectParser:
             # If we landed on a key-value param key, rewind it
             if self.nxt and self.nxt.tp == Tokens.EQUALS:
                 self.rewind()
+                if not len(conns): # Something went wrong!
+                    NetlistParseError.throw()
                 conns.pop()
             # Grab the module name, at this point errantly in the `conns` list
             module = conns.pop()  # FIXME: check this matched `Ident` and not `Int`

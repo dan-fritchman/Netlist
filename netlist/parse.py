@@ -1,4 +1,6 @@
 import os
+import codecs
+
 from pathlib import Path
 from warnings import warn
 from typing import List
@@ -74,6 +76,7 @@ class FileParser:
             except (NetlistParseError, ValidationError) as e:
                 # Error Handling.
                 # Can either include `Unknown` statements, or re-raise.
+                print(self.dialect_parser.lex.line)
                 warn(e)
                 s = Unknown("")
                 self.dialect_parser.eat_rest_of_statement()
@@ -88,7 +91,7 @@ class FileParser:
 
     def parse(self, path: Path) -> SourceFile:
         """ Parse the netlist `SourceFile` at `path`. """
-        with open(path, "r") as f:
+        with codecs.open(path, "r", encoding="utf-8", errors="replace") as f:
             self.path = path
             self.fp = f
             entries = self._parse_file()
@@ -127,7 +130,7 @@ class FileParser:
                 s = self.collect_subckt(start=e, entries=entries)
                 nodes.append(SubcktEntry(s.content, s.source_info,))
             elif isinstance(stmt, DialectChange):
-                continue  # Omit these 
+                continue  # Omit these
             else:
                 nodes.append(SubcktEntry(e.content, e.source_info))
         source_info = start.source_info
@@ -135,10 +138,7 @@ class FileParser:
         e = FileEntry(
             source_info=source_info,
             content=SubcktDef(
-                name=start.name,
-                ports=start.ports,
-                params=start.params,
-                entries=nodes,
+                name=start.name, ports=start.ports, params=start.params, entries=nodes,
             ),
         )
         return e
@@ -168,12 +168,14 @@ class Parser:
         # 2nd pass, parse included-files
         for e in f.contents:
             s = e.content
-            if isinstance(s, Include):
+            if isinstance(s, (Include, UseLib)):
                 # Differentiate absolute vs relative paths, relative to active source-file
                 incp = s.path if s.path.is_absolute() else p.parent / s.path
                 incp = incp.resolve()
                 if not incp.exists() or not incp.is_file():
                     raise FileNotFoundError(incp)
+                if incp in self.deps:
+                    continue
 
                 from .dialects.spectre import SpectreMixin
 
@@ -184,9 +186,6 @@ class Parser:
                 else:
                     self.file_parser = FileParser(self.dialect)
                 self.parse(incp)
-            if isinstance(s, UseLib):
-                # Not supported, yet
-                NetlistParseError.throw()
 
     def entries(self):
         """ Iterator of all parsed Entries """

@@ -99,32 +99,7 @@ class SpiceDialectParser(DialectParser):
         self.match(Tokens.OPTION)
         vals = self.parse_param_values()
         self.match(Tokens.NEWLINE)
-        return Options(vals)
-
-    def parse_dot_lib(self):
-        """ Parse a line beginning with `.lib`, which may be *defining* or *using* the library! """
-        parts = line.split()
-        if parts[0].lower() != ".lib":
-            NetlistParseError.throw()
-        if len(parts) == 2:
-            return StartLib(Ident(parts[1]))
-        elif len(parts) == 3:
-            return UseLib(path=Path(parts[1], section=Ident(parts[2])))
-        NetlistParseError.throw()
-
-    def parse_inc(self):
-        txt = line.replace(".include", "").replace(".inc", "").strip()
-        if txt.startswith('"'):
-            if txt.endswith('"'):
-                return Include(Path(txt[1:-1]))
-            else:
-                NetlistParseError.throw("Unclosed String")
-        if txt.startswith("'"):
-            if txt.endswith("'"):
-                return Include(Path(txt[1:-1]))
-            else:
-                NetlistParseError.throw("Unclosed String")
-        return Include(Path(txt))
+        return Options(name=None, vals=vals)
 
     def are_stars_comments_now(self) -> bool:
         from .base import ParserState

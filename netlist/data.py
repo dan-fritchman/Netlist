@@ -102,6 +102,7 @@ class Primitive:
 
 @dataclass
 class Options:
+    name: Optional[Ident]
     vals: List[ParamVal]
 
 
@@ -171,6 +172,16 @@ class EndLib:
 
 
 @dataclass
+class StartLibSection:
+    name: Ident
+
+
+@dataclass
+class EndLibSection:
+    name: Ident
+
+
+@dataclass
 class UseLib:
     path: Path
     section: Ident
@@ -235,7 +246,7 @@ SubcktStatement = Union[StartSubckt, EndSubckt, MostStatements]
 SubcktNode = Union[SubcktDef, MostStatements]
 
 MostFileStatements = Union[
-    Options, Include, AhdlInclude, StartLib, EndLib, UseLib, StatisticsBlock, End,
+    Options, Include, AhdlInclude, StartLib, EndLib, UseLib, StartLibSection, EndLibSection, StatisticsBlock, End,
 ]
 Statement = Union[SubcktStatement, MostFileStatements]
 
@@ -248,10 +259,12 @@ class Entry:
     content: Statement
     source_info: Optional[SourceInfo] = None
 
+
 @dataclass
 class FileEntry:
     content: FileNode
     source_info: Optional[SourceInfo] = None
+
 
 @dataclass
 class SubcktEntry:

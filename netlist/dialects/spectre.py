@@ -16,6 +16,10 @@ class SpectreMixin:
         self.expect(Tokens.EQUALS)
         self.expect(Tokens.IDENT)
         d = DialectChange(self.cur.val)
+
+        # FIXME: ignoring additional parameters e.g. `insensitive`
+        while self.nxt and self.nxt.tp != Tokens.NEWLINE:
+            self.advance()
         # self.expect(Tokens.NEWLINE) # Note this is left for the *new* dialect to parse
 
         self.parent.notify(d)
@@ -64,7 +68,11 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
             Tokens.MODEL: self.parse_model,
             Tokens.STATS: self.parse_statistics_block,
             Tokens.AHDL: self.parse_ahdl,
-            Tokens.IDENT: self.parse_instance,
+            Tokens.LIBRARY: self.parse_start_lib,
+            Tokens.SECTION: self.parse_start_section,
+            Tokens.ENDSECTION: self.parse_end_section,
+            Tokens.INCLUDE: self.parse_include,
+            Tokens.IDENT: self.parse_named,  # Catch-all for any non-keyword identifier
         }
         for tok, func in rules.items():
             if pk.tp == tok:
@@ -72,6 +80,26 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
 
         # No match - error time.
         NetlistParseError.throw()
+
+    def parse_named(self):
+        """ Parse an identifier-named statement. 
+        Instances, Options, and Analyses fall into this category,
+        by beginning with their name, then their type-keyword. 
+        The general method is to read one token ahead, then rewind 
+        before dispatching to more detailed parsing methods. """
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        if self.nxt is None:
+            NetlistParseError.throw()
+        if self.nxt.tp == Tokens.OPTIONS:
+            self.rewind()
+            return self.parse_options()
+        if self.nxt.tp in (Tokens.IDENT, Tokens.INT, Tokens.LPAREN):
+            self.rewind()
+            return self.parse_instance()
+        # No match - error time.
+        NetlistParseError.throw()
+
 
     def parse_model(self) -> Union[ModelDef, ModelFamily]:
         """ Parse a Model statement """
@@ -95,7 +123,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         # Single ModelDef
         params = self.parse_param_declarations()
         return ModelDef(mname, mtype, [], params)
-    
+
     def parse_param_statement(self) -> ParamDecls:
         """ Parse a Parameter-Declaration Statement """
         from .base import _endargs_startkwargs
@@ -203,16 +231,49 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         return self.cur and self.cur.tp == Tokens.NEWLINE
 
     def parse_expr(self) -> Expr:
-        """ Parse an Expression """ 
-        # No parameter-literal characters; defer to base-class `expr0`. 
+        """ Parse an Expression """
+        # No parameter-literal characters; defer to base-class `expr0`.
         return self.parse_expr0()
 
+    def parse_start_lib(self):
+        self.expect(Tokens.LIBRARY)
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        self.expect(Tokens.NEWLINE)
+        return StartLib(name)
+
+    def parse_start_section(self):
+        self.expect(Tokens.SECTION)
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        self.expect(Tokens.NEWLINE)
+        return StartLibSection(name)
+    
+    def parse_end_section(self):
+        self.expect(Tokens.ENDSECTION)
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        self.expect(Tokens.NEWLINE)
+        return EndLibSection(name)
+
     def parse_options(self):
-        raise NotImplementedError
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        self.expect(Tokens.OPTIONS)
+        vals = self.parse_param_values()
+        return Options(name=name, vals=vals)
 
-    def parse_lib(self):
-        raise NotImplementedError
-
-    def parse_inc(self):
-        raise NotImplementedError
+    def parse_include(self) -> Union[Include, UseLib]:
+        """ Parse an Include Statement """
+        self.expect(Tokens.INCLUDE)
+        self.expect(Tokens.QUOTESTR)
+        path = self.cur.val[1:-1]  # Strip out the quotes
+        if self.match(Tokens.NEWLINE): # Non-sectioned `Include`
+            return Include(path)
+        # Otherwise expect a library `Section`
+        self.expect(Tokens.SECTION)
+        self.expect(Tokens.EQUALS)
+        self.expect(Tokens.IDENT)
+        section = Ident(self.cur.val)
+        return UseLib(path, section)
 
