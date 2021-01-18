@@ -173,10 +173,20 @@ class End:
 
 
 @dataclass
-class StatisticsBlock:
-    """ Statistical Descriptions. Largely un-parsed for now. """
+class Variation:
+    """ Single-Parameter Variation Declaration """
 
-    txt: str
+    name: Ident
+    dist: str
+    std: 'Expr'
+
+
+@dataclass
+class StatisticsBlock:
+    """ Statistical Descriptions """
+
+    process: Optional[List[Variation]]
+    mismatch: Optional[List[Variation]]
 
 
 @dataclass
@@ -279,6 +289,7 @@ Expr = Union["UnOp", "BinOp", "TernOp", Int, Float, MetricNum, Ident, Call]
 @dataclass
 class UnOp:
     """ Unary Operation """
+
     tp: str
     targ: Expr
 
@@ -286,6 +297,7 @@ class UnOp:
 @dataclass
 class BinOp:
     """ Binary Operation """
+
     tp: str
     left: Expr
     right: Expr
@@ -294,12 +306,15 @@ class BinOp:
 @dataclass
 class TernOp:
     """ Ternary Operation """
+
     cond: Expr
     if_true: Expr
     if_false: Expr
 
 
 # Update all the forward-type-references
+Variation.__pydantic_model__.update_forward_refs()
+StatisticsBlock.__pydantic_model__.update_forward_refs()
 Call.__pydantic_model__.update_forward_refs()
 Primitive.__pydantic_model__.update_forward_refs()
 ParamVal.__pydantic_model__.update_forward_refs()

@@ -25,7 +25,9 @@ class SpectreMixin:
 
 
 class SpectreSpiceDialectParser(SpectreMixin, SpiceDialectParser):
-    """ Spice-Style Syntax, as Interpreted by Spectre """
+    """ Spice-Style Syntax, as Interpreted by Spectre. 
+    Primarily differs from the base SpiceDialect in its capacity for
+    `simulator lang` statements which produce `DialectChanges`. """
 
     enum = NetlistDialects.SPECTRE_SPICE
 
@@ -84,30 +86,79 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         if self.nxt and self.nxt.tp == Tokens.EQUALS:
             self.rewind()
             args.pop()
-        args = [ParamDecl(a, None) for a in args] 
+        args = [ParamDecl(a, None) for a in args]
         # Parse the remaining default-valued params
         vals = self.parse_param_declarations()  # NEWLINE is captured inside
         return ParamDecls(vals)
 
+    def parse_variations(self) -> List[Variation]:
+        """ Parse a list of variation-statements, of the form
+        `{ 
+            vary param1 dist=distname std=stdval 
+            vary param2 dist=distname std=stdval 
+        }\n` 
+        Consumes the both opening and closing brackets, 
+        and the (required) newline following the closing bracket. """
+        self.expect(Tokens.LBRACKET)
+        self.expect(Tokens.NEWLINE)
+        vars = []
+        while not self.match(Tokens.RBRACKET):
+            self.expect(Tokens.IDENT)
+            if self.cur.val != "vary":
+                NetlistParseError.throw()
+            self.expect(Tokens.IDENT)
+            name = Ident(self.cur.val)
+
+            dist = None
+            std = None
+            while not self.match(Tokens.NEWLINE):
+                self.expect(Tokens.IDENT)
+                if self.cur.val == "dist":
+                    if dist is not None:
+                        NetlistParseError.throw()
+                    self.expect(Tokens.EQUALS)
+                    self.expect(Tokens.IDENT)
+                    dist = str(self.cur.val)
+                elif self.cur.val == "std":
+                    if std is not None:
+                        NetlistParseError.throw()
+                    self.expect(Tokens.EQUALS)
+                    std = self.parse_expr()
+                else:
+                    NetlistParseError.throw()
+            vars.append(Variation(name, dist, std))
+
+        self.expect(Tokens.NEWLINE)
+        return vars
+
     def parse_statistics_block(self) -> StatisticsBlock:
-        """ Parse the `statistics` block, kinda. 
-        FIXME: Just soaks up everything between its outer squiggly-brackets as a string, for now. """
+        """ Parse the `statistics` block """
 
         self.expect(Tokens.STATS)
         self.expect(Tokens.LBRACKET)
         self.expect(Tokens.NEWLINE)
-        brack_count = 1
-        while brack_count > 0:
-            if self.match(Tokens.RBRACKET):
-                brack_count -= 1
-            elif self.match(Tokens.LBRACKET):
-                brack_count += 1
+
+        process = None
+        mismatch = None
+
+        while not self.match(Tokens.RBRACKET):
+            self.expect(Tokens.IDENT)
+            if self.cur.val == "process":
+                if process is not None:
+                    NetlistParseError.throw()
+                process = self.parse_variations()
+            elif self.cur.val == "mismatch":
+                if mismatch is not None:
+                    NetlistParseError.throw()
+                mismatch = self.parse_variations()
             else:
-                self.advance()
+                NetlistParseError.throw()
+
         self.expect(Tokens.NEWLINE)
-        return Unknown("STATS")
+        return StatisticsBlock(process=process, mismatch=mismatch)
 
     def parse_ahdl(self):
+        """ Parse an `ahdl_include` statement """ 
         self.expect(Tokens.AHDL)
         self.expect(Tokens.QUOTESTR)
         rv = AhdlInclude(self.cur.val)
