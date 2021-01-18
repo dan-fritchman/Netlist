@@ -273,17 +273,19 @@ class Call:
     args: List["Expr"]  # Arguments List
 
 
-Expr = Union["UnOp", "BinOp", Int, Float, MetricNum, Ident, Call]
+Expr = Union["UnOp", "BinOp", "TernOp", Int, Float, MetricNum, Ident, Call]
 
 
 @dataclass
 class UnOp:
+    """ Unary Operation """
     tp: str
     targ: Expr
 
 
 @dataclass
 class BinOp:
+    """ Binary Operation """
     tp: str
     left: Expr
     right: Expr
@@ -291,6 +293,7 @@ class BinOp:
 
 @dataclass
 class TernOp:
+    """ Ternary Operation """
     cond: Expr
     if_true: Expr
     if_false: Expr

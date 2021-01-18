@@ -37,6 +37,10 @@ tokens = dict(
     TICK=r"\'",
     COMMA=r"\,",
     COLON=r"\:",
+    GT=r"\>",
+    LT=r"\<",
+    GE=r"\>\=",
+    LE=r"\<\=",
     EQUALS=r"\=",
     DOLLAR=r"\$",
     QUESTION=r"\?",
@@ -161,7 +165,7 @@ class DialectParser:
         self.cur = None
         self.nxt = None
         self.nxt0 = None
-        self.rewinding = False 
+        self.rewinding = False
         # Initialize our lexer and its token-generator
         self.lex = lex
         self.lex.parser = self
@@ -210,7 +214,7 @@ class DialectParser:
         raise ValueError
 
     def is_comment(self, tok: Token) -> bool:
-        raise NotImplementedError 
+        raise NotImplementedError
 
     def eat_blanks(self):
         """ Pass over blank-lines, generally created by full-line comments. """
@@ -230,7 +234,7 @@ class DialectParser:
     def are_stars_comments_now(self) -> bool:
         """ Boolean indication of whether Tokens.STAR and DUBSTAR should 
         currently be lexed as a comment. """
-        raise NotImplementedError 
+        raise NotImplementedError
 
     def is_comment(self, tok: Token) -> bool:
         return tok.tp in (Tokens.DUBSLASH, Tokens.DOLLAR,) or (
@@ -340,8 +344,8 @@ class DialectParser:
 
         else:  # No-parens case
             ports = self.parse_node_list(_endargs_startkwargs)
-            # If we landed on a key-value param key, rewind it 
-            if self.nxt and self.nxt.tp == Tokens.EQUALS: 
+            # If we landed on a key-value param key, rewind it
+            if self.nxt and self.nxt.tp == Tokens.EQUALS:
                 self.rewind()
                 ports.pop()
 
@@ -408,8 +412,8 @@ class DialectParser:
 
         else:  # No-parens case
             args = self.parse_expr_list(_endargs_startkwargs)
-            # If we landed on a key-value param key, rewind it 
-            if self.nxt and self.nxt.tp == Tokens.EQUALS: 
+            # If we landed on a key-value param key, rewind it
+            if self.nxt and self.nxt.tp == Tokens.EQUALS:
                 self.rewind()
                 if not len(args):
                     print(5)
@@ -438,8 +442,8 @@ class DialectParser:
 
         else:  # No-parens case
             conns = self.parse_node_list(_endargs_startkwargs)
-            # If we landed on a key-value param key, rewind it 
-            if self.nxt and self.nxt.tp == Tokens.EQUALS: 
+            # If we landed on a key-value param key, rewind it
+            if self.nxt and self.nxt.tp == Tokens.EQUALS:
                 self.rewind()
                 conns.pop()
             # Grab the module name, at this point errantly in the `conns` list
@@ -473,7 +477,7 @@ class DialectParser:
         return self.parse_list(self.parse_param_declaration, term=term)
 
     def parse_param_values(self) -> List[ParamVal]:
-        """ ( ident = expr )* """ 
+        """ ( ident = expr )* """
         term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
         return self.parse_list(self.parse_param_val, term=term)
 
@@ -495,30 +499,43 @@ class DialectParser:
             self.state = ParserState.EXPR  # Note: this comes first
             self.expect(Tokens.TICK)
             e = self.parse_expr0()
-            self.state = ParserState.PROGRAM # Note: this comes first
+            self.state = ParserState.PROGRAM  # Note: this comes first
             self.expect(Tokens.TICK)
             return e
         if self.nxt and self.nxt.tp == Tokens.LBRACKET:
             self.state = ParserState.EXPR  # Note: this comes first
             self.expect(Tokens.LBRACKET)
             e = self.parse_expr0()
-            self.state = ParserState.PROGRAM # Note: this comes first
+            self.state = ParserState.PROGRAM  # Note: this comes first
             self.expect(Tokens.RBRACKET)
             return e
         return self.parse_expr0()
 
     def parse_expr0(self) -> Expr:
+        """ expr0b ( (<|>|<=|>=) expr0b )? """
+        e = self.parse_expr0b()
+        if self.match_any(Tokens.GT, Tokens.LT, Tokens.GE, Tokens.LE):
+            tp = self.cur.tp
+            right = self.parse_expr0b()
+            return BinOp(tp=tp, left=e, right=right)
+        return e
+
+    def parse_expr0b(self) -> Expr:
         """ expr1 ( (+|-) expr0 )? """
         e = self.parse_expr1()
         if self.match_any(Tokens.PLUS, Tokens.MINUS):
-            return BinOp(tp=self.cur.tp, left=e, right=self.parse_expr0())
+            tp = self.cur.tp
+            right = self.parse_expr0b()
+            return BinOp(tp=tp, left=e, right=right)
         return e
 
     def parse_expr1(self) -> Expr:
         """ expr2 ( (*|/) expr1 )? """
         e = self.parse_expr2()
         if self.match_any(Tokens.STAR, Tokens.SLASH):
-            return BinOp(tp=self.cur.tp, left=e, right=self.parse_expr1())
+            tp = self.cur.tp
+            right = self.parse_expr1()
+            return BinOp(tp=tp, left=e, right=right)
         return e
 
     def parse_expr2(self) -> Expr:
@@ -529,12 +546,12 @@ class DialectParser:
         return e
 
     def parse_expr2b(self) -> Expr:
-        """ expr3 ( ? expr3 : expr3 )? """
+        """ expr3 ( ? expr0 : expr0 )? """
         e = self.parse_expr3()
         if self.match(Tokens.QUESTION):
-            if_true = self.parse_expr3()
+            if_true = self.parse_expr0()
             self.expect(Tokens.COLON)
-            if_false = self.parse_expr3()
+            if_false = self.parse_expr0()
             return TernOp(e, if_true, if_false)
         return e
 
