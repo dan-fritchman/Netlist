@@ -72,6 +72,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
             Tokens.SECTION: self.parse_start_section,
             Tokens.ENDSECTION: self.parse_end_section,
             Tokens.INCLUDE: self.parse_include,
+            Tokens.REAL: self.parse_function_def,
             Tokens.IDENT: self.parse_named,  # Catch-all for any non-keyword identifier
         }
         for tok, func in rules.items():
@@ -88,7 +89,6 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         The general method is to read one token ahead, then rewind 
         before dispatching to more detailed parsing methods. """
         self.expect(Tokens.IDENT)
-        name = Ident(self.cur.val)
         if self.nxt is None:
             NetlistParseError.throw()
         if self.nxt.tp == Tokens.OPTIONS:
@@ -99,7 +99,6 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
             return self.parse_instance()
         # No match - error time.
         NetlistParseError.throw()
-
 
     def parse_model(self) -> Union[ModelDef, ModelFamily]:
         """ Parse a Model statement """
@@ -248,7 +247,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         name = Ident(self.cur.val)
         self.expect(Tokens.NEWLINE)
         return StartLibSection(name)
-    
+
     def parse_end_section(self):
         self.expect(Tokens.ENDSECTION)
         self.expect(Tokens.IDENT)
@@ -268,7 +267,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         self.expect(Tokens.INCLUDE)
         self.expect(Tokens.QUOTESTR)
         path = self.cur.val[1:-1]  # Strip out the quotes
-        if self.match(Tokens.NEWLINE): # Non-sectioned `Include`
+        if self.match(Tokens.NEWLINE):  # Non-sectioned `Include`
             return Include(path)
         # Otherwise expect a library `Section`
         self.expect(Tokens.SECTION)
@@ -277,3 +276,46 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         section = Ident(self.cur.val)
         return UseLib(path, section)
 
+    def parse_function_def(self):
+        """ Yes, Spectre does have function definitions! 
+        Syntax: `rtype name (argtype argname, argtype argname) {
+            statements;
+            return rval;
+        }`
+        Caveats:
+        * Only `real` return and argument types are supported
+        * Only single-statement functions comprising a `return Expr;` are supported
+        """
+        self.expect(Tokens.REAL) # Return type; fixed here
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        self.expect(Tokens.LPAREN) 
+        # Parse arguments
+        args = []
+        MAX_ARGS = 100  # Set a "time-out" so that we don't get stuck here.
+        for i in range(MAX_ARGS, -1, -1):
+            if self.match(Tokens.RPAREN):
+                break
+            self.expect(Tokens.REAL) # Argument type; fixed here
+            self.expect(Tokens.IDENT)
+            a = TypedArg(tp=Ident("real"), name=Ident(self.cur.val))
+            args.append(a) 
+            if self.match(Tokens.RPAREN):
+                break
+            self.expect(Tokens.COMMA)
+        if i <= 0:  # Check the time-out
+            NetlistParseError.throw()
+        
+        self.expect(Tokens.LBRACKET)
+        self.expect(Tokens.NEWLINE)
+        # Return-statement 
+        self.expect(Tokens.RETURN)
+        rv = self.parse_expr()
+        ret = Return(rv)
+        self.expect(Tokens.SEMICOLON)
+        self.expect(Tokens.NEWLINE)
+        # Function-Closing
+        self.expect(Tokens.RBRACKET)
+        self.expect(Tokens.NEWLINE)
+
+        return FunctionDef(name=name, rtype=Ident("real"), args=args, stmts=[ret])

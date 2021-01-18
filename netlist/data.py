@@ -236,6 +236,7 @@ MostStatements = Union[
     ModelVariant,
     ModelFamily,
     DialectChange,
+    'FunctionDef',
     Unknown,
 ]
 
@@ -246,7 +247,16 @@ SubcktStatement = Union[StartSubckt, EndSubckt, MostStatements]
 SubcktNode = Union[SubcktDef, MostStatements]
 
 MostFileStatements = Union[
-    Options, Include, AhdlInclude, StartLib, EndLib, UseLib, StartLibSection, EndLibSection, StatisticsBlock, End,
+    Options,
+    Include,
+    AhdlInclude,
+    StartLib,
+    EndLib,
+    UseLib,
+    StartLibSection,
+    EndLibSection,
+    StatisticsBlock,
+    End,
 ]
 Statement = Union[SubcktStatement, MostFileStatements]
 
@@ -317,6 +327,30 @@ class Call:
     args: List["Expr"]  # Arguments List
 
 
+@dataclass
+class TypedArg:
+    tp: Ident
+    name: Ident
+
+
+@dataclass
+class Return:
+    val: "Expr"
+
+
+# Types which can be used inside a function definition.
+# Will of course grow, in time.
+FuncStatement = Union[Return]
+
+
+@dataclass
+class FunctionDef:
+    name: Ident
+    rtype: Ident
+    args: List[TypedArg]
+    stmts: List[FuncStatement]
+
+
 Expr = Union["UnOp", "BinOp", "TernOp", Int, Float, MetricNum, Ident, Call]
 
 
@@ -346,10 +380,11 @@ class TernOp:
     if_false: Expr
 
 
-# Update all the forward-type-references
+# Update all the forward type-references
 Variation.__pydantic_model__.update_forward_refs()
 StatisticsBlock.__pydantic_model__.update_forward_refs()
 Call.__pydantic_model__.update_forward_refs()
+Return.__pydantic_model__.update_forward_refs()
 Primitive.__pydantic_model__.update_forward_refs()
 ParamVal.__pydantic_model__.update_forward_refs()
 ParamDecl.__pydantic_model__.update_forward_refs()

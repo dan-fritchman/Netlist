@@ -36,6 +36,7 @@ _patterns1 = dict(
     STAR=r"\*",
     TICK=r"\'",
     COMMA=r"\,",
+    SEMICOLON=r"\;",
     COLON=r"\:",
     GE=r"\>\=",
     LE=r"\<\=",
@@ -73,6 +74,8 @@ _keywords = dict(
     PARAM=r"param",
     OPTIONS=r"options",
     OPTION=r"option",
+    REAL=r"real",
+    RETURN=r"return",
     DEV_GAUSS=r"dev\/gauss",  # Perhaps there are more "dev/{x}" to be added; gauss is the known one for now.
 )
 _patterns2 = dict(
