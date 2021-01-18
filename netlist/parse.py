@@ -17,6 +17,7 @@ from .data import (
     Include,
     UseLib,
 )
+from .data import *
 
 
 def default_dialect(path: os.PathLike) -> NetlistDialects:
@@ -91,7 +92,56 @@ class FileParser:
             self.path = path
             self.fp = f
             entries = self._parse_file()
-        return SourceFile(path, entries)
+        return self.collect(entries)
+
+    def collect(self, entries: List[Entry]) -> SourceFile:
+        """ Second-pass to create multi-statement tree structure, 
+        e.g. nested Sub-Circuit definitions. """
+        nodes = []
+        while True:
+            try:
+                e = entries.pop(0)
+            except IndexError:
+                break
+            stmt = e.content
+            if isinstance(stmt, StartSubckt):
+                s = self.collect_subckt(start=e, entries=entries)
+                nodes.append(s)
+            elif isinstance(stmt, DialectChange):
+                continue  # Omit these
+            else:
+                nodes.append(FileEntry(e.content, e.source_info))
+        return SourceFile(self.path, nodes)
+
+    def collect_subckt(self, start: StartSubckt, entries: List[Entry]) -> SubcktDef:
+        nodes = []
+        while True:
+            try:
+                e = entries.pop(0)
+            except IndexError:
+                NetlistParseError.throw()
+            stmt = e.content
+            if isinstance(stmt, EndSubckt):
+                break  # done with this module
+            elif isinstance(stmt, StartSubckt):
+                s = self.collect_subckt(start=e, entries=entries)
+                nodes.append(SubcktEntry(s.content, s.source_info,))
+            elif isinstance(stmt, DialectChange):
+                continue  # Omit these 
+            else:
+                nodes.append(SubcktEntry(e.content, e.source_info))
+        source_info = start.source_info
+        start = start.content
+        e = FileEntry(
+            source_info=source_info,
+            content=SubcktDef(
+                name=start.name,
+                ports=start.ports,
+                params=start.params,
+                entries=nodes,
+            ),
+        )
+        return e
 
 
 class Parser:

@@ -118,6 +118,16 @@ class EndSubckt:
 
 
 @dataclass
+class SubcktDef:
+    """ Sub-Circuit / Module Definition """
+
+    name: Ident  # Module/ Subcircuit Name
+    ports: List[Ident]  # Port List
+    params: List[ParamDecl]  # Parameter Declarations
+    entries: List["SubcktEntry"]
+
+
+@dataclass
 class ModelDef:
     name: Ident  # Model Name
     mtype: Ident  # Model Type
@@ -198,11 +208,6 @@ class Unknown:
 
 
 @dataclass
-class Comment:
-    txt: str
-
-
-@dataclass
 class DialectChange:
     """ Netlist Dialect Changes, e.g. `simulator lang=xyz` """
 
@@ -210,27 +215,32 @@ class DialectChange:
 
 
 # The big union-type of everything that makes a valid single-line statement
-Statement = Union[
-    Comment,
-    ParamDecls,
+
+# A shorthand for a bunch of stuff, "mixed in" to several other type-unions.
+MostStatements = Union[
     Instance,
     Primitive,
-    Options,
-    StartSubckt,
-    EndSubckt,
+    ParamDecls,
     ModelDef,
     ModelVariant,
     ModelFamily,
-    Include,
-    AhdlInclude,
-    StartLib,
-    EndLib,
-    UseLib,
-    End,
     DialectChange,
-    StatisticsBlock,
     Unknown,
 ]
+
+# (Flat) statements which can appear in sub-circuit definitions
+SubcktStatement = Union[StartSubckt, EndSubckt, MostStatements]
+
+# Nodes which can be the (direct) children of sub-circuit definitions
+SubcktNode = Union[SubcktDef, MostStatements]
+
+MostFileStatements = Union[
+    Options, Include, AhdlInclude, StartLib, EndLib, UseLib, StatisticsBlock, End,
+]
+Statement = Union[SubcktStatement, MostFileStatements]
+
+# Nodes which can be the (direct) children of `SourceFiles`
+FileNode = Union[SubcktNode, MostFileStatements]
 
 
 @dataclass
@@ -238,11 +248,21 @@ class Entry:
     content: Statement
     source_info: Optional[SourceInfo] = None
 
+@dataclass
+class FileEntry:
+    content: FileNode
+    source_info: Optional[SourceInfo] = None
+
+@dataclass
+class SubcktEntry:
+    content: SubcktNode
+    source_info: Optional[SourceInfo] = None
+
 
 @dataclass
 class SourceFile:
     path: Path  # Source File Path
-    contents: List[Entry]  # Statements and their associated SourceInfo
+    contents: List[FileEntry]  # Statements and their associated SourceInfo
 
 
 @dataclass
@@ -323,5 +343,6 @@ ParamDecl.__pydantic_model__.update_forward_refs()
 ParamDecls.__pydantic_model__.update_forward_refs()
 SourceInfo.__pydantic_model__.update_forward_refs()
 Entry.__pydantic_model__.update_forward_refs()
+SubcktDef.__pydantic_model__.update_forward_refs()
 SourceFile.__pydantic_model__.update_forward_refs()
 Program.__pydantic_model__.update_forward_refs()
