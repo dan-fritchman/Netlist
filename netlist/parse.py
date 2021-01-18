@@ -139,7 +139,7 @@ class Parser:
                 NetlistParseError.throw()
 
     def entries(self):
-        """ Iterator of all parsed entries """
+        """ Iterator of all parsed Entries """
         for f in self.program.files:
             for e in f.contents:
                 yield e

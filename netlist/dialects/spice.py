@@ -9,6 +9,8 @@ class SpiceDialectParser(DialectParser):
     Further specializations are made for HSPICE, NGSPICE, etc. 
     """
 
+    enum = NetlistDialects.SPICE
+
     def parse_statement(self) -> Optional[Statement]:
         """ Statement Parser 
         Dispatches to type-specific parsers based on prioritized set of matching rules. 
@@ -156,4 +158,9 @@ class SpiceDialectParser(DialectParser):
 class NgSpiceDialectParser(SpiceDialectParser):
     # FIXME: actually specialize!
     enum = NetlistDialects.NGSPICE
+
+
+class HspiceDialectParser(SpiceDialectParser):
+    # FIXME: actually specialize!
+    enum = NetlistDialects.HSPICE
 
