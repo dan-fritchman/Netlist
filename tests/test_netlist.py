@@ -119,7 +119,7 @@ def test_param_values():
 
 def test_primitive():
     from netlist import SpiceDialectParser
-    from netlist.data import Ident, BinOp, Primitive, Float, Int, ParamVal 
+    from netlist.data import Ident, BinOp, Primitive, Float, Int, ParamVal
 
     txt = """ r1 1 0
 + fun_param='((0.5*(x-2*y))+z)/(2*(a-2*b))'
@@ -190,6 +190,28 @@ def test_instance():
         +     + vc3_raw_end*(1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1))))       """  # The question: adding these (((
     p = SpectreDialectParser.from_str(txt)
     i = p.parse(p.parse_instance)
+
+
+def test_instance_parens():
+    """ Spectre has a fun behavior with dangling close-parens at the end of instance statements - 
+    it accepts as many as you care to provide. 
+    So this is a valid instance:
+    rsad 1 0 resistor r=1  )))))) // really, with all those parentheses
+    The same close-paren behavior does not apply to parameter-declaration statements. 
+    It may apply to other types. 
+    """
+    txt = "rsad 1 0 resistor r=1  ))))))"
+    from netlist import SpectreDialectParser
+    from netlist import Ident, ParamVal, Int, Instance
+
+    p = SpectreDialectParser.from_str(txt)
+    i = p.parse(p.parse_instance)
+    assert i == Instance(
+        name=Ident(name="rsad"),
+        module=Ident(name="resistor"),
+        conns=[Ident(name="1"), Ident(name="0")],
+        params=[ParamVal(name=Ident(name="r"), val=Int(val=1))],
+    )
 
 
 def test_subckt_def():

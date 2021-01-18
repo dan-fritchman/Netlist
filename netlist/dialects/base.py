@@ -452,9 +452,13 @@ class DialectParser:
             module = conns.pop()  # FIXME: check this matched `Ident` and not `Int`
 
         # Parse parameters
-        params = self.parse_param_values()
+        params = self.parse_instance_param_values()
         # And create & return our instance
         return Instance(name=name, module=module, conns=conns, params=params)
+
+    def parse_instance_param_values(self) -> List[ParamVal]:
+        # Base class parses instance-params as any other params
+        return self.parse_param_values()
 
     def parse_param_val(self) -> ParamVal:
         self.expect(Tokens.IDENT)

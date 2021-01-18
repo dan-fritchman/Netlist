@@ -8,8 +8,6 @@ class SpectreMixin:
     primarily related to the capacity for `DialectChanges` 
     via a `simulator lang` statement. """
 
-    COMMENT_CHARS = ["*", "//", "$"]
-
     def parse_dialect_change(self) -> Optional[DialectChange]:
         """ Parse a DialectChange. Leaves its trailing NEWLINE to be parsed by a (likely new) DialectParser. """
 
@@ -158,12 +156,22 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         return StatisticsBlock(process=process, mismatch=mismatch)
 
     def parse_ahdl(self):
-        """ Parse an `ahdl_include` statement """ 
+        """ Parse an `ahdl_include` statement """
         self.expect(Tokens.AHDL)
         self.expect(Tokens.QUOTESTR)
         rv = AhdlInclude(self.cur.val)
         self.expect(Tokens.NEWLINE)
         return rv
+
+    def parse_instance_param_values(self) -> List[ParamVal]:
+        """ Parse a list of instance parameter-values, 
+        including the fun-fact that Spectre allows arbitrary dangling closing parens. """
+        term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE) or s.match(Tokens.RPAREN)
+        vals = self.parse_list(self.parse_param_val, term=term)
+        if self.match(Tokens.RPAREN): # Eat potential dangling r-parens
+            while self.nxt is not None and not self.match(Tokens.NEWLINE):
+                self.expect(Tokens.RPAREN)
+        return vals 
 
     def are_stars_comments_now(self) -> bool:
         # Stars are comments only to begin lines. (?)
