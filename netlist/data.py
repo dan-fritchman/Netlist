@@ -1,3 +1,11 @@
+""" 
+
+# Netlist Data Model 
+
+Primarily in the form of pydantic dataclasses. 
+
+"""
+
 import os
 import re
 from enum import Enum
@@ -34,7 +42,7 @@ def to_json(arg) -> str:
 
 @dataclass
 class SourceInfo:
-    """ Per-Statement Source Information """
+    """ Parser Source Information """
 
     line: int
     dialect: "NetlistDialects"
@@ -52,7 +60,7 @@ class HierPath:
     path: List[Ident]
 
 
-@dataclass(eq=True, frozen=True)
+@dataclass
 class ParamDecl:
     """ Parameter Declaration 
     Includes Optional Distribution Information """
@@ -62,7 +70,7 @@ class ParamDecl:
     distr: Optional[str] = None
 
 
-@dataclass(eq=True, frozen=True)
+@dataclass
 class ParamDecls:
     """ Parameter Declarations, 
     as via the `param` keywords. """
@@ -70,7 +78,7 @@ class ParamDecls:
     params: List[ParamDecl]
 
 
-@dataclass(eq=True, frozen=True)
+@dataclass
 class ParamVal:
     """ Parameter Value-Set """
 
@@ -182,6 +190,18 @@ class EndLibSection:
 
 
 @dataclass
+class LibSection:
+    name: Ident
+    entries: List["Entry"]
+
+
+@dataclass
+class Library:
+    name: Ident
+    sections: List[LibSection]
+
+
+@dataclass
 class UseLib:
     path: Path
     section: Ident
@@ -236,7 +256,7 @@ MostStatements = Union[
     ModelVariant,
     ModelFamily,
     DialectChange,
-    'FunctionDef',
+    "FunctionDef",
     Unknown,
 ]
 
@@ -261,12 +281,18 @@ MostFileStatements = Union[
 Statement = Union[SubcktStatement, MostFileStatements]
 
 # Nodes which can be the (direct) children of `SourceFiles`
-FileNode = Union[SubcktNode, MostFileStatements]
+FileNode = Union[Library, SubcktStatement, MostFileStatements]
 
 
 @dataclass
 class Entry:
     content: Statement
+    source_info: Optional[SourceInfo] = None
+
+
+@dataclass
+class FileEntryFlat:
+    content: FileNode
     source_info: Optional[SourceInfo] = None
 
 
@@ -310,14 +336,13 @@ class MetricNum:
 
 @dataclass
 class Call:
-    """ Function Call Node 
+    """ 
+    Function Call Node 
+
     All valid parameter-generating function calls return a single value, 
     usable in a mathematical expression (`Expr`) context. 
     All arguments are provided by position and stored in a List. 
     All arguments must also be resolvable as mathematical expressions. 
-    Function-names are left as identifiers (`Ident`). 
-    No checking is performed as to their availability, 
-    nor are they checked for membership of any keyword-list. 
     
     Examples:
     `sqrt(2)` => Call(func=Ident("sqrt"), args=([Int(2)]),)
@@ -392,5 +417,6 @@ ParamDecls.__pydantic_model__.update_forward_refs()
 SourceInfo.__pydantic_model__.update_forward_refs()
 Entry.__pydantic_model__.update_forward_refs()
 SubcktDef.__pydantic_model__.update_forward_refs()
+LibSection.__pydantic_model__.update_forward_refs()
 SourceFile.__pydantic_model__.update_forward_refs()
 Program.__pydantic_model__.update_forward_refs()
