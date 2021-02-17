@@ -69,6 +69,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
             Tokens.STATS: self.parse_statistics_block,
             Tokens.AHDL: self.parse_ahdl,
             Tokens.LIBRARY: self.parse_start_lib,
+            Tokens.ENDLIBRARY: self.parse_end_lib,
             Tokens.SECTION: self.parse_start_section,
             Tokens.ENDSECTION: self.parse_end_section,
             Tokens.INCLUDE: self.parse_include,
@@ -240,6 +241,13 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         name = Ident(self.cur.val)
         self.expect(Tokens.NEWLINE)
         return StartLib(name)
+    
+    def parse_end_lib(self):
+        self.expect(Tokens.ENDLIBRARY)
+        self.expect(Tokens.IDENT)
+        name = Ident(self.cur.val)
+        self.expect(Tokens.NEWLINE)
+        return EndLib(name)
 
     def parse_start_section(self):
         self.expect(Tokens.SECTION)

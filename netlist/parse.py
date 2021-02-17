@@ -39,6 +39,7 @@ class Parser:
 
     def __init__(self, dialect: NetlistDialects):
         self.deps: List[Path] = []
+        self.pending: List[Tuple[Path, NetlistDialects]] = []
         self.program = Program([])
         self.dialect = dialect
         self.file_parser = FileParser(dialect)
@@ -48,12 +49,17 @@ class Parser:
 
         # Perform our primary file-parsing, to a list of Entries
         path, stmts = self.file_parser.parse(p)
+        # Recursively descend into files it depends upon
+        self.recurse(path, stmts)
         # Filter out a few things
         stmts = [e for e in stmts if not isinstance(e.content, DialectChange)]
         # And form into a scope-hierarchical tree
-        return hierarchicalize(path, stmts)
+        rv = hierarchicalize(path, stmts)
+        return rv
 
     def parse(self, path: os.PathLike):
+        """ Parse a potentially multi-file netlist-Program, starting from `path`. """
+        
         # Check for validity of source file
         p = Path(path).absolute()
         if not p.exists() or not p.is_file():
@@ -64,31 +70,38 @@ class Parser:
         f = self.parse_file(p)
         # Add it to our parsed result
         self.program.files.append(f)
-        # And recursively descend into files it depends upon
-        self.recurse(f)
 
-    def recurse(self, f: SourceFile):
-        """ Parse included-files in SourceFile `f` """
-        for e in f.contents:
+        # If we have any pending dependencies, parse them too
+        if self.pending:
+            path, dialect = self.pending.pop()
+            self.file_parser = FileParser(dialect)
+            self.parse(path)
+
+        # Return `self` to allow nested calls, e.g. p.parse(path1).parse(path2)
+        return self
+
+    def recurse(self, path: Path, entries: List[FileEntry]):
+        """ Add included-files in `entries` to our pending-list """
+        from .dialects.spectre import SpectreMixin
+
+        for e in entries:
             s = e.content
             if isinstance(s, (Include, UseLib)):
                 # Differentiate absolute vs relative paths, relative to active source-file
-                incp = s.path if s.path.is_absolute() else f.path.parent / s.path
+                incp = s.path if s.path.is_absolute() else path.parent / s.path
                 incp = incp.resolve()
                 if not incp.exists() or not incp.is_file():
                     raise FileNotFoundError(incp)
-                if incp in self.deps:
+                if incp in self.deps or incp in [p[0] for p in self.pending]:
                     continue
 
-                from .dialects.spectre import SpectreMixin
-
-                if isinstance(self.dialect, SpectreMixin):
-                    # Update our dialect based on the file-extension we load
-                    d_enum = default_dialect(incp)
-                    self.file_parser = FileParser(d_enum)
-                else:
-                    self.file_parser = FileParser(self.dialect)
-                self.parse(incp)
+                # Sort out which initial dialect to parse, based on current dialect and file-extension
+                dialect = (
+                    default_dialect(incp)
+                    if isinstance(self.file_parser.dialect, SpectreMixin)
+                    else self.dialect
+                )
+                self.pending.append((incp, dialect))
 
     def entries(self):
         """ Iterator of all parsed Entries """
@@ -121,7 +134,7 @@ class FileParser:
         dcls = DialectParser.from_enum(dialect)
         self.dialect_parser = dcls.from_parser(self.dialect_parser)
 
-    def _parse_file(self) -> List[Entry]:
+    def _parse_file(self) -> List[FileEntry]:
         """ Parse the (open) file-pointer at `self.fp` """
 
         # Create our iterator over file-lines, and core dialect-parser
@@ -147,12 +160,12 @@ class FileParser:
                 #     f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{lines} "
                 # )
             if s is not None:  # None-value indicates EOF
-                e = Entry(s, si)
+                e = FileEntry(s, si)
                 entries.append(e)
 
         return entries
 
-    def parse(self, path: Path) -> Tuple[Path, List[Entry]]:
+    def parse(self, path: Path) -> Tuple[Path, List[FileEntry]]:
         """ Parse the netlist `SourceFile` at `path`. """
         with codecs.open(path, "r", encoding="utf-8", errors="replace") as f:
             self.path = path
@@ -161,7 +174,7 @@ class FileParser:
         return (path, entries)
 
 
-def hierarchicalize(p: Path, entries: List[Entry]) -> SourceFile:
+def hierarchicalize(p: Path, entries: List[FileEntry]) -> SourceFile:
     nodes = HierarchyCollector(entries).collect()
     return SourceFile(p, nodes)
 
@@ -171,18 +184,18 @@ class HierarchyCollector:
     * Libraries and Sections
     * (Potentially nested) Sub-Circuit definitions. """
 
-    def __init__(self, entries: List[Entry]):
+    def __init__(self, entries: List[FileEntry]):
         self.entries = entries
 
-    def nxt(self) -> Entry:
+    def nxt(self) -> FileEntry:
         try:
             return self.entries.pop(0)
         except IndexError:
             return None
 
-    def collect(self) -> List[FileNode]:
+    def collect(self) -> List[TreeEntry]:
         """ Primary Entry Point. 
-        Transform a list of flat file-entries to a hierarchical tree of file-nodes. """
+        Transform a list of flat file-entries to a hierarchical tree. """
         nodes = []
         while True:
             e = self.nxt()
@@ -191,12 +204,12 @@ class HierarchyCollector:
             stmt = e.content
             if isinstance(stmt, StartSubckt):
                 s = self.collect_subckt(start=e)
-                nodes.append(FileEntry(s, e.source_info))
+                nodes.append(TreeEntry(s, e.source_info))
             elif isinstance(stmt, StartLib):
                 s = self.collect_lib(start=e)
-                nodes.append(FileEntry(s, e.source_info))
+                nodes.append(TreeEntry(s, e.source_info))
             else:
-                nodes.append(FileEntry(e.content, e.source_info))
+                nodes.append(TreeEntry(e.content, e.source_info))
         return nodes
 
     def collect_subckt(self, start: StartSubckt) -> SubcktDef:
@@ -210,9 +223,9 @@ class HierarchyCollector:
                 break  # done with this module
             elif isinstance(stmt, StartSubckt):
                 s = self.collect_subckt(start=e)
-                nodes.append(SubcktEntry(s, e.source_info))
+                nodes.append(TreeEntry(s, e.source_info))
             else:  # Anything else, copy along
-                nodes.append(SubcktEntry(e.content, e.source_info))
+                nodes.append(TreeEntry(e.content, e.source_info))
         st = start.content
         return SubcktDef(name=st.name, ports=st.ports, params=st.params, entries=nodes)
 
@@ -229,9 +242,9 @@ class HierarchyCollector:
                 NetlistParseError.throw()  # these don't nest; something's wrong
             elif isinstance(stmt, StartSubckt):
                 s = self.collect_subckt(start=e)
-                nodes.append(Entry(s, e.source_info))
+                nodes.append(TreeEntry(s, e.source_info))
             else:  # Anything else, copy along
-                nodes.append(Entry(e.content, e.source_info))
+                nodes.append(TreeEntry(e.content, e.source_info))
         start = start.content
         return LibSection(name=start.name, entries=nodes)
 

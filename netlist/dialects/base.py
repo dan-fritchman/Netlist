@@ -63,6 +63,7 @@ _keywords = dict(
     INLINE=r"inline",
     SUBCKT=r"subckt",
     ENDS=r"ends",
+    ENDLIBRARY=r"endlibrary",
     LIBRARY=r"library",
     LIB=r"lib",
     ENDL=r"endl",

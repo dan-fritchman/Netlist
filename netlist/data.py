@@ -11,9 +11,25 @@ import re
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Any, Dict, Union, List, Tuple
+from dataclasses import is_dataclass
 
 from pydantic import ValidationError
 from pydantic.dataclasses import dataclass
+
+
+# _dataclasses = []
+
+
+# def dataclass(_arg):
+#     """ pydantic.dataclass wrapper to register each into our list, for later updates """
+#     from pydantic.dataclasses import dataclass
+
+#     def inner(_arg):
+#         global _dataclasses
+#         _dataclasses.append(_arg)
+#         return dataclass(_arg)
+
+#     return inner
 
 
 class NetlistParseError(Exception):
@@ -48,7 +64,7 @@ class SourceInfo:
     dialect: "NetlistDialects"
 
 
-@dataclass(eq=True, frozen=True)
+@dataclass
 class Ident:
     name: str
 
@@ -133,7 +149,7 @@ class SubcktDef:
     name: Ident  # Module/ Subcircuit Name
     ports: List[Ident]  # Port List
     params: List[ParamDecl]  # Parameter Declarations
-    entries: List["SubcktEntry"]
+    entries: List["TreeEntry"]
 
 
 @dataclass
@@ -192,7 +208,7 @@ class EndLibSection:
 @dataclass
 class LibSection:
     name: Ident
-    entries: List["Entry"]
+    entries: List["TreeEntry"]
 
 
 @dataclass
@@ -245,10 +261,11 @@ class DialectChange:
     dialect: str
 
 
-# The big union-type of everything that makes a valid single-line statement
-
-# A shorthand for a bunch of stuff, "mixed in" to several other type-unions.
-MostStatements = Union[
+# The big union-type(s) of everything that makes a valid single-line statement
+DelimStatement = Union[
+    StartSubckt, EndSubckt, StartLib, EndLib, StartLibSection, EndLibSection,
+]
+FlatStatement = Union[
     Instance,
     Primitive,
     ParamDecls,
@@ -256,62 +273,39 @@ MostStatements = Union[
     ModelVariant,
     ModelFamily,
     DialectChange,
-    "FunctionDef",
     Unknown,
-]
-
-# (Flat) statements which can appear in sub-circuit definitions
-SubcktStatement = Union[StartSubckt, EndSubckt, MostStatements]
-
-# Nodes which can be the (direct) children of sub-circuit definitions
-SubcktNode = Union[SubcktDef, MostStatements]
-
-MostFileStatements = Union[
     Options,
     Include,
     AhdlInclude,
-    StartLib,
-    EndLib,
     UseLib,
-    StartLibSection,
-    EndLibSection,
     StatisticsBlock,
     End,
+    "FunctionDef",
 ]
-Statement = Union[SubcktStatement, MostFileStatements]
 
-# Nodes which can be the (direct) children of `SourceFiles`
-FileNode = Union[Library, SubcktStatement, MostFileStatements]
+# All valid single "line" statements
+Statement = Union[FlatStatement, DelimStatement]
+
+# All hierarchical nodes
+Node = Union[Library, LibSection, SubcktDef, FlatStatement]
 
 
 @dataclass
-class Entry:
+class FileEntry:
     content: Statement
     source_info: Optional[SourceInfo] = None
 
 
 @dataclass
-class FileEntryFlat:
-    content: FileNode
-    source_info: Optional[SourceInfo] = None
-
-
-@dataclass
-class FileEntry:
-    content: FileNode
-    source_info: Optional[SourceInfo] = None
-
-
-@dataclass
-class SubcktEntry:
-    content: SubcktNode
+class TreeEntry:
+    content: Node
     source_info: Optional[SourceInfo] = None
 
 
 @dataclass
 class SourceFile:
     path: Path  # Source File Path
-    contents: List[FileEntry]  # Statements and their associated SourceInfo
+    contents: List[TreeEntry]  # Statements and their associated SourceInfo
 
 
 @dataclass
@@ -405,7 +399,7 @@ class TernOp:
     if_false: Expr
 
 
-# Update all the forward type-references
+# Update all the forward type-references 
 Variation.__pydantic_model__.update_forward_refs()
 StatisticsBlock.__pydantic_model__.update_forward_refs()
 Call.__pydantic_model__.update_forward_refs()
@@ -415,7 +409,8 @@ ParamVal.__pydantic_model__.update_forward_refs()
 ParamDecl.__pydantic_model__.update_forward_refs()
 ParamDecls.__pydantic_model__.update_forward_refs()
 SourceInfo.__pydantic_model__.update_forward_refs()
-Entry.__pydantic_model__.update_forward_refs()
+FileEntry.__pydantic_model__.update_forward_refs()
+TreeEntry.__pydantic_model__.update_forward_refs()
 SubcktDef.__pydantic_model__.update_forward_refs()
 LibSection.__pydantic_model__.update_forward_refs()
 SourceFile.__pydantic_model__.update_forward_refs()
