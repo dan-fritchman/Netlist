@@ -42,6 +42,7 @@ _patterns1 = dict(
     LE=r"\<\=",
     GT=r"\>",
     LT=r"\<",
+    DUBEQUALS=r"\=\=",
     EQUALS=r"\=",
     DOLLAR=r"\$",
     QUESTION=r"\?",
@@ -77,6 +78,8 @@ _keywords = dict(
     OPTION=r"option",
     REAL=r"real",
     RETURN=r"return",
+    IF=r"if",
+    ELSE=r"else",
     DEV_GAUSS=r"dev\/gauss",  # Perhaps there are more "dev/{x}" to be added; gauss is the known one for now.
 )
 _patterns2 = dict(
@@ -111,6 +114,8 @@ class Lexer:
         self.line_num = 1
         self.toks = iter(pat.scanner(self.line).match, None)
 
+    UPDATE_EVERY_N_LINES = 10_000
+
     def nxt(self) -> Optional[Token]:
         """ Get our next Token, pulling a new line if necessary. """
         m = next(self.toks, None)
@@ -119,6 +124,8 @@ class Lexer:
             if self.line is None:  # End of input
                 return None
             self.line_num += 1
+            if self.line_num % self.UPDATE_EVERY_N_LINES == 0:
+                print(f'Lexing Line #{self.line_num} (Lookin Pretty Long!)')
             self.toks = iter(pat.scanner(self.line).match, None)
             m = next(self.toks, None)
             if m is None:
@@ -347,7 +354,9 @@ class DialectParser:
         self.expect(Tokens.IDENT, Tokens.INT)
         return Ident(str(self.cur.val))
 
-    def parse_list(self, parse_item, term, *, MAXN=10_000) -> List[Any]:
+    DEFAULT_MAX_LIST_LEN = 50_000 # A general check against port-lists and the like timing out 
+
+    def parse_list(self, parse_item, term, *, MAXN=DEFAULT_MAX_LIST_LEN) -> List[Any]:
         """ Parse a whitespace-separated list of entries possible by function `parse_item`. 
         Terminated in the condition `term(self)`. """
         rv = []
@@ -359,16 +368,16 @@ class DialectParser:
             NetlistParseError.throw()
         return rv
 
-    def parse_node_list(self, term, *, MAXN=10_000) -> List[Ident]:
+    def parse_node_list(self, term, *, MAXN=DEFAULT_MAX_LIST_LEN) -> List[Ident]:
         """ Parse a Node-Identifier (Ident or Int) list, 
         terminated in the condition `term(self)`. """
         return self.parse_list(self.parse_node_ident, term=term, MAXN=MAXN)
 
-    def parse_ident_list(self, term, *, MAXN=10_000) -> List[Ident]:
+    def parse_ident_list(self, term, *, MAXN=DEFAULT_MAX_LIST_LEN) -> List[Ident]:
         """ Parse list of Identifiers """
         return self.parse_list(self.parse_ident, term=term, MAXN=MAXN)
 
-    def parse_expr_list(self, term, *, MAXN=10_000) -> List[Expr]:
+    def parse_expr_list(self, term, *, MAXN=DEFAULT_MAX_LIST_LEN) -> List[Expr]:
         """ Parse list of Expressions """
         return self.parse_list(self.parse_expr, term=term, MAXN=MAXN)
 
@@ -475,9 +484,9 @@ class DialectParser:
         return EndSubckt(name)
 
     def parse_expr0(self) -> Expr:
-        """ expr0b ( (<|>|<=|>=) expr0b )? """
+        """ expr0b ( (<|>|<=|>=|==) expr0b )? """
         e = self.parse_expr0b()
-        if self.match_any(Tokens.GT, Tokens.LT, Tokens.GE, Tokens.LE):
+        if self.match_any(Tokens.GT, Tokens.LT, Tokens.GE, Tokens.LE, Tokens.DUBEQUALS):
             tp = self.cur.tp
             right = self.parse_expr0b()
             return BinOp(tp=tp, left=e, right=right)

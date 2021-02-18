@@ -74,6 +74,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
             Tokens.ENDSECTION: self.parse_end_section,
             Tokens.INCLUDE: self.parse_include,
             Tokens.REAL: self.parse_function_def,
+            Tokens.IF: self.parse_conditional,
             Tokens.IDENT: self.parse_named,  # Catch-all for any non-keyword identifier
         }
         for tok, func in rules.items():
@@ -82,6 +83,36 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
 
         # No match - error time.
         NetlistParseError.throw()
+
+    def parse_conditional(self):
+        """ Parse an if/else conditional """
+        self.expect(Tokens.IF)
+        self.expect(Tokens.LPAREN)
+        cond = self.parse_expr()
+        self.expect(Tokens.RPAREN)
+        self.expect(Tokens.LBRACKET)
+        self.eat_rest_of_statement()
+        stmts = []
+        while not self.match(Tokens.RBRACKET):
+            s = self.parse_statement()
+            stmts.append(s)
+        blocks = [ConditionalBlock(cond, stmts)]
+        while self.match(Tokens.ELSE):
+            if self.match(Tokens.LBRACKET):
+                cond = None  # "else" un-conditional case
+            else:
+                self.expect(Tokens.IF)
+                self.expect(Tokens.LPAREN)
+                cond = self.parse_expr()
+                self.expect(Tokens.RPAREN)
+                self.expect(Tokens.LBRACKET)
+                self.eat_rest_of_statement()
+            stmts = []
+            while not self.match(Tokens.RBRACKET):
+                s = self.parse_statement()
+                stmts.append(s)
+            blocks.append(ConditionalBlock(cond, stmts))
+        return Conditional(blocks)
 
     def parse_named(self):
         """ Parse an identifier-named statement. 
@@ -241,7 +272,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         name = Ident(self.cur.val)
         self.expect(Tokens.NEWLINE)
         return StartLib(name)
-    
+
     def parse_end_lib(self):
         self.expect(Tokens.ENDLIBRARY)
         self.expect(Tokens.IDENT)
@@ -294,29 +325,29 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         * Only `real` return and argument types are supported
         * Only single-statement functions comprising a `return Expr;` are supported
         """
-        self.expect(Tokens.REAL) # Return type; fixed here
+        self.expect(Tokens.REAL)  # Return type; fixed here
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
-        self.expect(Tokens.LPAREN) 
+        self.expect(Tokens.LPAREN)
         # Parse arguments
         args = []
         MAX_ARGS = 100  # Set a "time-out" so that we don't get stuck here.
         for i in range(MAX_ARGS, -1, -1):
             if self.match(Tokens.RPAREN):
                 break
-            self.expect(Tokens.REAL) # Argument type; fixed here
+            self.expect(Tokens.REAL)  # Argument type; fixed here
             self.expect(Tokens.IDENT)
             a = TypedArg(tp=Ident("real"), name=Ident(self.cur.val))
-            args.append(a) 
+            args.append(a)
             if self.match(Tokens.RPAREN):
                 break
             self.expect(Tokens.COMMA)
         if i <= 0:  # Check the time-out
             NetlistParseError.throw()
-        
+
         self.expect(Tokens.LBRACKET)
         self.expect(Tokens.NEWLINE)
-        # Return-statement 
+        # Return-statement
         self.expect(Tokens.RETURN)
         rv = self.parse_expr()
         ret = Return(rv)

@@ -253,6 +253,15 @@ class Unknown:
 
     txt: str
 
+@dataclass
+class ConditionalBlock:
+    cond: Optional['Expr'] 
+    stmts: List['Statement']
+
+@dataclass
+class Conditional:
+    blocks: List[ConditionalBlock]
+
 
 @dataclass
 class DialectChange:
@@ -281,6 +290,7 @@ FlatStatement = Union[
     StatisticsBlock,
     End,
     "FunctionDef",
+    Conditional
 ]
 
 # All valid single "line" statements
@@ -401,6 +411,8 @@ class TernOp:
 
 # Update all the forward type-references 
 Variation.__pydantic_model__.update_forward_refs()
+ConditionalBlock.__pydantic_model__.update_forward_refs()
+Conditional.__pydantic_model__.update_forward_refs()
 StatisticsBlock.__pydantic_model__.update_forward_refs()
 Call.__pydantic_model__.update_forward_refs()
 Return.__pydantic_model__.update_forward_refs()

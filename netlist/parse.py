@@ -9,6 +9,26 @@ from .dialects import DialectParser
 from .data import *
 
 
+class Node:
+    """ Helper for catching `pydantic.ValidationError`s. 
+    Usage: Replace 
+    `MyDataCls(*args, **kwargs)` with 
+    `Node.new(MyDataCls, args, kwargs)`
+    Validation errors can be analyzed by breaking or otherwise debugging 
+    from the `except`-clause below. """
+
+    @staticmethod
+    def new(cls, args=None, kwargs=None):
+        try:
+            if not args:
+                args = tuple()
+            if not kwargs:
+                kwargs = dict()
+            return cls(*args, **kwargs)
+        except ValidationError as e:
+            raise e
+
+
 def parse(path: os.PathLike, *, dialect=None) -> Program:
     """ Parse a Multi-File Netlist-Program """
     d = dialect or default_dialect(path)
@@ -29,7 +49,7 @@ def default_dialect(path: os.PathLike) -> NetlistDialects:
     p = Path(path).absolute()
     if not p.exists() or not p.is_file():
         raise FileNotFoundError(p)
-    if p.suffix == "scs":
+    if p.suffix == ".scs":
         return NetlistDialects.SPECTRE
     return NetlistDialects.SPECTRE_SPICE
 
@@ -37,10 +57,11 @@ def default_dialect(path: os.PathLike) -> NetlistDialects:
 class Parser:
     """ Multi-File "Netlist Program" Parser """
 
-    def __init__(self, dialect: NetlistDialects):
+    def __init__(self, dialect: NetlistDialects, recursive: bool = True):
         self.deps: List[Path] = []
         self.pending: List[Tuple[Path, NetlistDialects]] = []
         self.program = Program([])
+        self.recursive = recursive
         self.dialect = dialect
         self.file_parser = FileParser(dialect)
 
@@ -50,7 +71,8 @@ class Parser:
         # Perform our primary file-parsing, to a list of Entries
         path, stmts = self.file_parser.parse(p)
         # Recursively descend into files it depends upon
-        self.recurse(path, stmts)
+        if self.recursive:
+            self.recurse(path, stmts)
         # Filter out a few things
         stmts = [e for e in stmts if not isinstance(e.content, DialectChange)]
         # And form into a scope-hierarchical tree
@@ -59,7 +81,7 @@ class Parser:
 
     def parse(self, path: os.PathLike):
         """ Parse a potentially multi-file netlist-Program, starting from `path`. """
-        
+
         # Check for validity of source file
         p = Path(path).absolute()
         if not p.exists() or not p.is_file():
@@ -204,12 +226,15 @@ class HierarchyCollector:
             stmt = e.content
             if isinstance(stmt, StartSubckt):
                 s = self.collect_subckt(start=e)
-                nodes.append(TreeEntry(s, e.source_info))
+                nodes.append(Node.new(TreeEntry, (s, e.source_info)))
             elif isinstance(stmt, StartLib):
                 s = self.collect_lib(start=e)
-                nodes.append(TreeEntry(s, e.source_info))
+                nodes.append(Node.new(TreeEntry, (s, e.source_info)))
+            elif isinstance(stmt, StartLibSection):
+                s = self.collect_lib_section(start=e)
+                nodes.append(Node.new(TreeEntry, (s, e.source_info)))
             else:
-                nodes.append(TreeEntry(e.content, e.source_info))
+                nodes.append(Node.new(TreeEntry, (e.content, e.source_info)))
         return nodes
 
     def collect_subckt(self, start: StartSubckt) -> SubcktDef:
@@ -223,9 +248,9 @@ class HierarchyCollector:
                 break  # done with this module
             elif isinstance(stmt, StartSubckt):
                 s = self.collect_subckt(start=e)
-                nodes.append(TreeEntry(s, e.source_info))
+                nodes.append(Node.new(TreeEntry, (s, e.source_info)))
             else:  # Anything else, copy along
-                nodes.append(TreeEntry(e.content, e.source_info))
+                nodes.append(Node.new(TreeEntry, (e.content, e.source_info)))
         st = start.content
         return SubcktDef(name=st.name, ports=st.ports, params=st.params, entries=nodes)
 
@@ -242,9 +267,9 @@ class HierarchyCollector:
                 NetlistParseError.throw()  # these don't nest; something's wrong
             elif isinstance(stmt, StartSubckt):
                 s = self.collect_subckt(start=e)
-                nodes.append(TreeEntry(s, e.source_info))
+                nodes.append(Node.new(TreeEntry, (s, e.source_info)))
             else:  # Anything else, copy along
-                nodes.append(TreeEntry(e.content, e.source_info))
+                nodes.append(Node.new(TreeEntry, (e.content, e.source_info)))
         start = start.content
         return LibSection(name=start.name, entries=nodes)
 
