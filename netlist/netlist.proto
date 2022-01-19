@@ -1,0 +1,249 @@
+// 
+// # Netlist Schema 
+// 
+// Integrated circuit "netlists", particularly those targeted for custom and/or analog circuits, 
+// serve as the primary input to "SPICE-class" simulators. 
+// These programs evaluate the behavior and performance of a circuit in terms of differential equations 
+// derived from two sources: (a) fundamental physics (particularly Kirchoff's laws), and 
+// (b) a (typically-built in) set of primitive-device models. 
+// 
+// While the name "netlist" primarily implies the definition of a circuit, such simulator input 
+// (and the associated `netlist` schema) really includes two categories of information: 
+// (a) Circuit definitions to be simulated, and 
+// (b) "Control" elements for the simulation
+// 
+// The latter comprises a wide variety of functions, including: 
+// * Analysis Statements, dictating which of the many analysis-modes to be undertaken 
+// * Model "Definitions", which provide parameters to the generally-parametrizable in-built device models
+// * Inclusion of other netlist content, typically specified by file-paths
+// * Numerical options and other user configuration, such as selection of signals to be saved. 
+// 
+// While conceptually fairly separable, SPICE-class simulaiton programs typically do not differentiate between 
+// these two families of content. Circuit and Control "cards" may be included in arbitrary order. 
+// 
+
+syntax = "proto3";
+package netlist;
+
+// # Identifier 
+message Ident {
+    string name = 1;
+}
+
+// # Identifier List
+message IdentList {
+    repeated Ident idents = 1;
+}
+
+// # Hierarchical Path 
+message HierPath {
+    repeated Ident path = 1;
+}
+
+// # Parameter Declaration  
+// Includes optional distribution & unit information 
+message ParamDeclaration {
+    Ident name = 1;
+    Expr default = 2;
+    string distr = 3;
+}
+
+// # List of Parameter Declarations 
+message ParamDeclList {
+    repeated ParamDeclaration param = 1;
+}
+
+// # Parameter Value
+message ParamValue {
+    Ident name = 1;
+    Expr value = 2;
+}
+
+// # Subcircuit / Module Instance 
+message Instance {
+    Ident name = 1;
+    Ident module = 2;
+    oneof conns {
+        IdentList by_order = 3;
+        ConnList by_names = 4;
+    }
+    repeated ParamValue params = 5;
+}
+
+// # Connection By Name Port-Name
+message Connection {
+    Ident port = 1;
+    Ident signal = 2;
+}
+
+// # List of Connections By Name 
+message ConnList {
+    repeated Connection conn = 1;
+}
+
+// # Simulator-Defined Primitive Instance  
+// 
+// Note primitives can have both (a) variable-length port-lists, and (b) variable-length parameter lists. 
+// So from at parsing-time, before models are sorted out, it is not always clear what is a port, model name, and parameter value. 
+// Primitives instead store positional and keyword arguments `args` and `kwargs`. 
+// 
+message Primitive {
+    Ident name = 1; 
+    repeated Expr args = 2;
+    repeated ParamValue kwargs = 3;
+}
+
+// # Simulator Options 
+message Options {
+    repeated ParamValue vals = 1;
+}
+
+// # Device Model 
+message ModelDefinition {
+    Ident name = 1;
+    Ident mtype = 2;
+    repeated Ident args = 3;
+    repeated ParamValue params = 4;
+}
+
+// # Device Model Variant 
+message ModelVariant {
+    Ident model = 1;
+    Ident variant = 2;
+    repeated Ident args = 3;
+    repeated ParamDeclaration params = 4;
+}
+
+// # Model Family 
+// 
+// Compound model-definition, comprised of one or more `ModelVariant`s. 
+message ModelFamily {
+    Ident name = 1;
+    Ident mtype = 2;
+    repeated ModelVariant variants = 3;
+}
+
+// # Include File 
+message Include {
+    string path = 1;
+}
+
+// # Analog-HDL Include File 
+message AhdlInclude {
+    string path = 1;
+}
+
+// # Library Include 
+message LibraryInclude {
+    string path = 1;
+    string section = 2;
+}
+
+// # End Message 
+// Empty zero-size indicator that a netlist should end, now. 
+message End {}
+
+// # Statistics Block Definition 
+message StatisticsBlock {
+    string txt = 1;
+}
+
+// # Netlist Dialect Change
+message DialectChange {
+    string dialect = 1;
+}
+
+// # Comment 
+message Comment {
+    string txt = 1;
+}
+
+// # Netlist Statement Enumeration 
+// Includes all message-types that comprise complete, single-line statements.
+message Statement {
+    oneof tp {
+        Comment comment = 1;
+        ParamDeclList param_decls = 2;
+        Instance instance = 3;
+        Primitive primitive = 4;
+        Options options = 5;
+        ModelDefinition model_def = 6;
+        ModelVariant model_variant = 7;
+        ModelFamily model_family = 8;
+        Include include = 9;
+        AhdlInclude ahdl_include = 10;
+        LibraryInclude lib_include=11;
+        End end = 12;
+        DialectChange dialect_change = 13;
+        StatisticsBlock stats_block = 14;
+    }
+}
+
+// # Enumerated Spice-Style Netlist-Language Dialects
+enum Dialect {
+    SPICE = 0;
+    NGSPICE = 1;
+    HSPICE = 2;
+    SPECTRE_SPICE = 3;
+    SPECTRE = 4;
+}
+
+// # Netlist Source File 
+message SourceFile {
+    string path = 1;
+    Dialect starting_dialect = 2;
+    repeated Statement stmts = 3;
+}
+
+// # Multi-File Netlist "Program" 
+// 
+// A set of `Statement`s and `SourceFile`s. 
+// Typically comprises the input to most simulators, and most model libraries. 
+// 
+message Program {
+    repeated SourceFile files = 1;
+    repeated Statement stmts = 2;
+}
+
+// # Mathematical Expression 
+// Evaluatable mathematical quantity, comprising a `oneof` of several numeric and parameter types. 
+message Expr {
+    oneof tp {
+        int64 int = 1;
+        double float = 2;
+        string string = 3; // FIXME: whether "unit-ed" numbers are included here, or separately 
+        UnaryOp unary_op = 4;
+        BinaryOp binary_op = 5;
+        TernaryOp ternary_op = 6;
+        Ident ident = 7;
+        Call call = 8;
+    }
+}
+
+// # Unary Operation 
+message UnaryOp {
+    string op = 1;
+    Expr targ = 2;
+}
+
+// # Binary Operation 
+message BinaryOp {
+    string op = 1;
+    Expr left = 2;
+    Expr right = 3;
+}
+
+// # Ternary Operation 
+message TernaryOp {
+    Expr cond = 1;
+    Expr if_true = 2;
+    Expr if_false = 3;
+}
+
+// # Function Call 
+// All arguments are passed by position, and must be mathematically-expressible `Expr`s. 
+message Call {
+    Ident func = 1;
+    repeated Expr args = 2;
+}
+
