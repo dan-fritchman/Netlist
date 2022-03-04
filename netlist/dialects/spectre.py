@@ -159,6 +159,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
 
             dist = None
             std = None
+            percent = None  # FIXME: roll in
             while not self.match(Tokens.NEWLINE):
                 self.expect(Tokens.IDENT)
                 if self.cur.val == "dist":
@@ -172,9 +173,12 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
                         NetlistParseError.throw()
                     self.expect(Tokens.EQUALS)
                     std = self.parse_expr()
+                elif self.cur.val == "percent":
+                    self.expect(Tokens.EQUALS)
+                    percent = self.parse_expr()
                 else:
                     NetlistParseError.throw()
-            vars.append(Variation(name, dist, std))
+            vars.append(Variation(name, dist, std))  # FIXME: roll in `percent`
 
         self.expect(Tokens.NEWLINE)
         return vars
@@ -226,8 +230,8 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         return vals
 
     def are_stars_comments_now(self) -> bool:
-        # Stars are comments only to begin lines. (We think?)
-        return self.cur and self.cur.tp == Tokens.NEWLINE
+        # Stars are comments only to begin lines, and at the beginning of a file. (We think?)
+        return not self.lex.lexed_nonwhite_on_this_line
 
     def parse_expr(self) -> Expr:
         """ Parse an Expression """
@@ -286,29 +290,31 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         * Only `real` return and argument types are supported
         * Only single-statement functions comprising a `return Expr;` are supported
         """
-        self.expect(Tokens.REAL) # Return type; fixed here
+        self.expect(Tokens.REAL)  # Return type. FIXME: support more types than REAL
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
-        self.expect(Tokens.LPAREN) 
+        self.expect(Tokens.LPAREN)
         # Parse arguments
         args = []
         MAX_ARGS = 100  # Set a "time-out" so that we don't get stuck here.
         for i in range(MAX_ARGS, -1, -1):
             if self.match(Tokens.RPAREN):
                 break
-            self.expect(Tokens.REAL) # Argument type; fixed here
+            self.expect(
+                Tokens.REAL
+            )  # Argument type. FIXME: support more types than REAL
             self.expect(Tokens.IDENT)
             a = TypedArg(tp=Ident("real"), name=Ident(self.cur.val))
-            args.append(a) 
+            args.append(a)
             if self.match(Tokens.RPAREN):
                 break
             self.expect(Tokens.COMMA)
         if i <= 0:  # Check the time-out
             NetlistParseError.throw()
-        
+
         self.expect(Tokens.LBRACKET)
         self.expect(Tokens.NEWLINE)
-        # Return-statement 
+        # Return-statement
         self.expect(Tokens.RETURN)
         rv = self.parse_expr()
         ret = Return(rv)

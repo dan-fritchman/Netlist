@@ -1,5 +1,14 @@
-from ..data import *
+""" 
+# Netlist Parser Base Class
+
+"""
+
+# Std-Lib Imports
+import re
 from typing import Iterable
+
+# Local Imports
+from ..data import *
 
 
 # Numeric-value suffixes
@@ -46,7 +55,7 @@ _patterns1 = dict(
     DOLLAR=r"\$",
     QUESTION=r"\?",
     QUOTESTR=r"\".*\"",
-    MODEL_VARIANT=r"[A-Za-z_][A-Za-z0-9_]*\.\d+", # nmos.0, mymodel.3, etc
+    MODEL_VARIANT=r"[A-Za-z_][A-Za-z0-9_]*\.\d+",  # nmos.0, mymodel.3, etc
     METRIC_NUM=rf"(\d+(\.\d+)?|\.\d+)({suffix_pattern})",  # 1M or 1.0f or .1k
     FLOAT=r"(\d+[eE][+-]?\d+|(\d+\.\d*|\.\d+)([eE][+-]?\d+)?)",  # 1e3 or 1.0 or .1 (optional e-3)
     INT=r"\d+",
@@ -78,17 +87,14 @@ _keywords = dict(
     RETURN=r"return",
     DEV_GAUSS=r"dev\/gauss",  # Perhaps there are more "dev/{x}" to be added; gauss is the known one for now.
 )
-_patterns2 = dict(
-    IDENT=r"[A-Za-z_][A-Za-z0-9_]*",
-    ERROR=r"[\s\S]",
-)
+_patterns2 = dict(IDENT=r"[A-Za-z_][A-Za-z0-9_]*", ERROR=r"[\s\S]",)
 # Given each token its name as a key in the overall regex
 tokens = {key: rf"(?P<{key}>{val})" for key, val in _patterns1.items()}
 for key, val in _keywords.items():
-    # Insert \b word-boundaries around keywords 
+    # Insert \b word-boundaries around keywords
     tokens[key] = rf"(?P<{key}>\b{val}\b)"
 for key, val in _patterns2.items():
-    # Add the lower-priority patterns last 
+    # Add the lower-priority patterns last
     tokens[key] = rf"(?P<{key}>{val})"
 # Build our overall regex pattern, a union of all
 pat = re.compile("|".join(tokens.values()))
@@ -108,6 +114,7 @@ class Lexer:
         self.lines = lines
         self.line = next(self.lines, None)
         self.line_num = 1
+        self.lexed_nonwhite_on_this_line = False
         self.toks = iter(pat.scanner(self.line).match, None)
 
     def nxt(self) -> Optional[Token]:
@@ -144,6 +151,7 @@ class Lexer:
 
             # Handle continuation-lines
             if token and token.tp == Tokens.NEWLINE:
+                self.lexed_nonwhite_on_this_line = False
 
                 # Loop until a non-blank-line, non-comment, non-continuation token
                 token = self.eat_idle(self.nxt())
@@ -159,6 +167,7 @@ class Lexer:
                     yield Token(Tokens.NEWLINE, "\n")
                 continue  # Either way, restart this loop body
 
+            self.lexed_nonwhite_on_this_line = True
             yield token
             token = self.nxt()
 
@@ -424,7 +433,7 @@ class DialectParser:
             # If we landed on a key-value param key, rewind it
             if self.nxt and self.nxt.tp == Tokens.EQUALS:
                 self.rewind()
-                if not len(conns): # Something went wrong!
+                if not len(conns):  # Something went wrong!
                     NetlistParseError.throw()
                 conns.pop()
             # Grab the module name, at this point errantly in the `conns` list

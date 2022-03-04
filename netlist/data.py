@@ -2,12 +2,11 @@
 
 # Netlist Data Model 
 
-Primarily in the form of pydantic dataclasses. 
+All elements in the netlist-internal "IR", 
+primarily in the form of dataclasses. 
 
 """
 
-import os
-import re
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Any, Dict, Union, List, Tuple
@@ -281,7 +280,7 @@ MostFileStatements = Union[
 Statement = Union[SubcktStatement, MostFileStatements]
 
 # Nodes which can be the (direct) children of `SourceFiles`
-FileNode = Union[Library, SubcktStatement, MostFileStatements]
+FileNode = Union[Library, SubcktDef, SubcktStatement, MostFileStatements]
 
 
 @dataclass
@@ -406,6 +405,8 @@ class TernOp:
 
 
 # Update all the forward type-references
+UnOp.__pydantic_model__.update_forward_refs()
+BinOp.__pydantic_model__.update_forward_refs()
 Variation.__pydantic_model__.update_forward_refs()
 StatisticsBlock.__pydantic_model__.update_forward_refs()
 Call.__pydantic_model__.update_forward_refs()
@@ -419,4 +420,7 @@ Entry.__pydantic_model__.update_forward_refs()
 SubcktDef.__pydantic_model__.update_forward_refs()
 LibSection.__pydantic_model__.update_forward_refs()
 SourceFile.__pydantic_model__.update_forward_refs()
+FunctionDef.__pydantic_model__.update_forward_refs()
+FileEntry.__pydantic_model__.update_forward_refs()
+FunctionDef.__pydantic_model__.update_forward_refs()
 Program.__pydantic_model__.update_forward_refs()

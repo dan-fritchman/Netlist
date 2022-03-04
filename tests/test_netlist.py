@@ -1,3 +1,11 @@
+"""
+# Netlist Unit Tests 
+ 
+"""
+
+from textwrap import dedent
+
+
 def test_version():
     from netlist import __version__
 
@@ -7,17 +15,13 @@ def test_version():
 def test_spice_exprs():
     from netlist import (
         SpiceDialectParser,
-        Int,
-        Float,
-        MetricNum,
-        UnOp,
         BinOp,
         Ident,
-        Call,
     )
 
     def parse_expression(s: str) -> SpiceDialectParser:
-        """ Parse a string expression """
+        """ Parse a string expression, including placing the parser in EXPR mode first, 
+        particularly so that elements like "*" are interpreted as multiplication. """
         from netlist.dialects.base import ParserState
 
         parser = SpiceDialectParser.from_str(s)
@@ -142,11 +146,13 @@ def test_primitive():
     from netlist import SpiceDialectParser
     from netlist.data import Ident, BinOp, Primitive, Float, Int, ParamVal
 
-    txt = """ r1 1 0
-+ fun_param='((0.5*(x-2*y))+z)/(2*(a-2*b))'
-* A mid-stream line comment
-+ funner_param=11e-21
-"""
+    txt = dedent(
+        """ r1 1 0
+        + fun_param='((0.5*(x-2*y))+z)/(2*(a-2*b))'
+        * A mid-stream line comment
+        + funner_param=11e-21
+        """
+    )
     p = SpiceDialectParser.from_str(txt)
     i = p.parse(p.parse_primitive)
     assert i == Primitive(
@@ -206,7 +212,7 @@ def test_instance():
         ],
     )
 
-    txt = """rend  (r1 ra) resistor r=rend *(1 + vc1_raw_end*(1 - exp(-abs(v(r2,r1))))   
+    txt = """rend  (r1 ra) resistor r=rend *(1 + vc1_raw_end*(1 - exp(-abs(v(r2,r1))))
         +                            + vc2_raw_end*(1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1))))        )
         +     + vc3_raw_end*(1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1)))) * (1 - exp(-abs(v(r2,r1))))       """  # The question: adding these (((
     p = SpectreDialectParser.from_str(txt)
@@ -214,13 +220,23 @@ def test_instance():
 
 
 def test_instance_parens():
-    """ Spectre has a fun behavior with dangling close-parens at the end of instance statements - 
-    it accepts as many as you care to provide. 
-    So this is a valid instance:
+    """ 
+    Spectre has a fun behavior with dangling close-parens at the end of instance statements -
+    it accepts as many as you care to provide.
+    
+    So it will accept this is a valid instance:
+    ```
     rsad 1 0 resistor r=1  )))))) // really, with all those parentheses
-    The same close-paren behavior does not apply to parameter-declaration statements. 
-    It may apply to other types. 
+    ```
+
+    The same close-paren behavior does not apply to parameter-declaration statements.
+    It may apply to other types.
+    
+    You may ask, why should `netlist` inherit what is almost certainly a Spectre bug? 
+    Because, sadly, notable popular commercial netlists and models include some of these errant parentheses, 
+    and therefore only work *because* of the Spectre-bug. So, if we want to parse them, we need that bug too. 
     """
+
     txt = "rsad 1 0 resistor r=1  ))))))"
     from netlist import SpectreDialectParser
     from netlist import Ident, ParamVal, Int, Instance
@@ -255,27 +271,29 @@ def test_subckt_def():
 
 def test_model_family():
 
-    txt = """model npd_model bsim3 {
- 0: type=n
-//
-+ lmin = 1.0 lmax = 2.0 wmin = 1.2 wmax = 1.4
-+ level = 999
-+ // some commentary 
+    txt = dedent(
+        """model npd_model bsim3 {
+        0: type=n
+        //
+        + lmin = 1.0 lmax = 2.0 wmin = 1.2 wmax = 1.4
+        + level = 999
+        + // some commentary
 
 
-// plus some blank lines 
+        // plus some blank lines
 
-+ tnom = 30 
-1: type=n 
-+ version = 3.2 
-+ xj = 1.2e-7 
-+ lln = 1 
-// 
-//  Plus More Commentary 
-// 
-+ lwn = 1 
-}
-"""
+        + tnom = 30
+        1: type=n
+        + version = 3.2
+        + xj = 1.2e-7
+        + lln = 1
+        //
+        //  Plus More Commentary
+        //
+        + lwn = 1
+        }
+        """
+    )
 
     from netlist import SpectreDialectParser
     from netlist import Ident, ParamDecl, Int, Float, ModelVariant, ModelFamily
@@ -335,3 +353,34 @@ def test_model_family():
         ],
     )
 
+
+def test_spectre_midstream_comment():
+    """ Test for mid-stream full-line comments, which do not break up statements such as `model` 
+    from being line-continued. """
+
+    txt = dedent(
+        """model whatever diode
+        + level      =        3
+        *
+        * This commentary here does not break up the statement. 
+        *
+        + area       =        1.1e11
+        """
+    )
+    from netlist import SpectreDialectParser
+
+    p = SpectreDialectParser.from_str(txt)
+    i = p.parse(p.parse_model)
+
+    # Check that parsed to a `ModelDef`
+    from netlist.data import ModelDef, Ident, ParamDecl, Int, Float
+
+    assert i == ModelDef(
+        name=Ident(name="whatever"),
+        mtype=Ident(name="diode"),
+        args=[],
+        params=[
+            ParamDecl(name=Ident(name="level"), default=Int(val=3), distr=None),
+            ParamDecl(name=Ident(name="area"), default=Float(val=1.1e11), distr=None),
+        ],
+    )
