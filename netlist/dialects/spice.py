@@ -1,3 +1,4 @@
+from faulthandler import is_enabled
 from ..data import *
 from .base import DialectParser, Tokens
 
@@ -36,6 +37,7 @@ class SpiceDialectParser(DialectParser):
             for tok, func in rules.items():
                 if pk.tp == tok:
                     return func()
+            self.fail(f"Invalid or unsupported dot-statement: {pk}")
 
         elif pk.tp == Tokens.IDENT:
             if pk.val.lower().startswith("x"):
@@ -43,13 +45,12 @@ class SpiceDialectParser(DialectParser):
             return self.parse_primitive()
 
         # No match - error time.
-        NetlistParseError.throw()
+        self.fail(f"Unexpected token to begin statement: {pk}")
 
     def parse_include(self) -> Include:
         """ Parse an Include Statement """
         self.expect(Tokens.INC, Tokens.INCLUDE)
-        self.expect(Tokens.QUOTESTR)
-        path = self.cur.val[1:-1]  # Strip out the quotes
+        path = self.parse_quote_string()
         self.expect(Tokens.NEWLINE)
         return Include(path)
 
@@ -68,7 +69,7 @@ class SpiceDialectParser(DialectParser):
         if self.match(Tokens.MODEL_VARIANT):  # `model.variant` ModelVariant form
             spl = self.cur.val.split(".")
             if len(spl) != 2:
-                NetlistParseError.throw()
+                self.fail()
             mname = Ident(spl[0])
             variant = Ident(str(spl[1]))
             self.expect(Tokens.IDENT)  # FIXME: is this defined here or elsewhere?
@@ -106,28 +107,6 @@ class SpiceDialectParser(DialectParser):
 
         return self.state != ParserState.EXPR
 
-    def parse_expr(self) -> Expr:
-        """ Parse an Expression 
-        expr0 | 'expr0' | {expr0} """
-        # Note: moves into our `EXPR` state require a `peek`/`expect` combo,
-        # otherwise we can mis-understand multiplication vs comment.
-        from .base import ParserState
-
-        if self.nxt and self.nxt.tp == Tokens.TICK:
-            self.state = ParserState.EXPR  # Note: this comes first
-            self.expect(Tokens.TICK)
-            e = self.parse_expr0()
-            self.state = ParserState.PROGRAM  # Note: this comes first
-            self.expect(Tokens.TICK)
-            return e
-        if self.nxt and self.nxt.tp == Tokens.LBRACKET:
-            self.state = ParserState.EXPR  # Note: this comes first
-            self.expect(Tokens.LBRACKET)
-            e = self.parse_expr0()
-            self.state = ParserState.PROGRAM  # Note: this comes first
-            self.expect(Tokens.RBRACKET)
-            return e
-        return self.parse_expr0()
 
 
 class NgSpiceDialectParser(SpiceDialectParser):

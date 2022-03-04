@@ -1,179 +1,18 @@
 """ 
 # Netlist Parser Base Class
-
 """
 
 # Std-Lib Imports
-import re
 from typing import Iterable
 
 # Local Imports
 from ..data import *
-
-
-# Numeric-value suffixes
-suffixes = dict(
-    T=1.0e12,
-    G=1.0e9,
-    MEG=1.0e6,
-    X=1.0e6,
-    K=1.0e3,
-    M=1.0e-3,
-    MIL=2.54e-5,  # (1/1000 inch)
-    U=1.0e-6,
-    N=1.0e-9,
-    P=1.0e-12,
-    F=1.0e-15,
-    A=1.0e-18,
-)
-# Include both upper and lower-case versions.
-# (Python `re` complains about inserting this as an inline flag.)
-suffix_pattern = "|".join(list(suffixes.keys()) + [k.lower() for k in suffixes.keys()])
-
-# Master mapping of tokens <=> patterns
-_patterns1 = dict(
-    DUBSLASH=r"\/\/",
-    DUBSTAR=r"\*\*",
-    LPAREN=r"\(",
-    RPAREN=r"\)",
-    LBRACKET=r"\{",
-    RBRACKET=r"\}",
-    NEWLINE=r"\n",
-    WHITE=r"\s",
-    SLASH=r"\/",
-    CARET=r"\^",
-    STAR=r"\*",
-    TICK=r"\'",
-    COMMA=r"\,",
-    SEMICOLON=r"\;",
-    COLON=r"\:",
-    GE=r"\>\=",
-    LE=r"\<\=",
-    GT=r"\>",
-    LT=r"\<",
-    EQUALS=r"\=",
-    DOLLAR=r"\$",
-    QUESTION=r"\?",
-    QUOTESTR=r"\".*\"",
-    MODEL_VARIANT=r"[A-Za-z_][A-Za-z0-9_]*\.\d+",  # nmos.0, mymodel.3, etc
-    METRIC_NUM=rf"(\d+(\.\d+)?|\.\d+)({suffix_pattern})",  # 1M or 1.0f or .1k
-    FLOAT=r"(\d+[eE][+-]?\d+|(\d+\.\d*|\.\d+)([eE][+-]?\d+)?)",  # 1e3 or 1.0 or .1 (optional e-3)
-    INT=r"\d+",
-    PLUS=r"\+",
-    MINUS=r"\-",
-    DOT=r"\.",
-)
-_keywords = dict(
-    ENDSECTION=r"endsection",
-    SECTION=r"section",
-    AHDL=r"ahdl_include",
-    INCLUDE=r"include",
-    INC=r"inc",
-    INLINE=r"inline",
-    SUBCKT=r"subckt",
-    ENDS=r"ends",
-    LIBRARY=r"library",
-    LIB=r"lib",
-    ENDL=r"endl",
-    MODEL=r"model",
-    STATS=r"statistics",
-    SIMULATOR=r"simulator",
-    LANG=r"lang",
-    PARAMETERS=r"parameters",
-    PARAM=r"param",
-    OPTIONS=r"options",
-    OPTION=r"option",
-    REAL=r"real",
-    RETURN=r"return",
-    DEV_GAUSS=r"dev\/gauss",  # Perhaps there are more "dev/{x}" to be added; gauss is the known one for now.
-)
-_patterns2 = dict(IDENT=r"[A-Za-z_][A-Za-z0-9_]*", ERROR=r"[\s\S]",)
-# Given each token its name as a key in the overall regex
-tokens = {key: rf"(?P<{key}>{val})" for key, val in _patterns1.items()}
-for key, val in _keywords.items():
-    # Insert \b word-boundaries around keywords
-    tokens[key] = rf"(?P<{key}>\b{val}\b)"
-for key, val in _patterns2.items():
-    # Add the lower-priority patterns last
-    tokens[key] = rf"(?P<{key}>{val})"
-# Build our overall regex pattern, a union of all
-pat = re.compile("|".join(tokens.values()))
-# Create an enum-ish class of these token-types
-Tokens = type("Tokens", (object,), {k: k for k in tokens.keys()})
-
-
-@dataclass
-class Token:
-    tp: str
-    val: Any
-
-
-class Lexer:
-    def __init__(self, lines: Iterable[str]):
-        self.parser = None
-        self.lines = lines
-        self.line = next(self.lines, None)
-        self.line_num = 1
-        self.lexed_nonwhite_on_this_line = False
-        self.toks = iter(pat.scanner(self.line).match, None)
-
-    def nxt(self) -> Optional[Token]:
-        """ Get our next Token, pulling a new line if necessary. """
-        m = next(self.toks, None)
-        if m is None:  # Grab a new line
-            self.line = next(self.lines, None)
-            if self.line is None:  # End of input
-                return None
-            self.line_num += 1
-            self.toks = iter(pat.scanner(self.line).match, None)
-            m = next(self.toks, None)
-            if m is None:
-                return None
-        return Token(m.lastgroup, m.group())
-
-    def eat_idle(self, token) -> Optional[Token]:
-        """ Consume whitespace and comments, returning the next (potential) action-token. 
-        Does not handle line-continuations. """
-        while token and token.tp == Tokens.WHITE:
-            token = self.nxt()
-        if token and self.parser.is_comment(token):
-            while token and token.tp != Tokens.NEWLINE:
-                token = self.nxt()
-        return token
-
-    def lex(self):
-        """ Create an iterator over pattern-matches """
-        token = self.nxt()
-        while token:  # Iterate over token-matches
-
-            # Skip whitespace & comments
-            token = self.eat_idle(token)
-
-            # Handle continuation-lines
-            if token and token.tp == Tokens.NEWLINE:
-                self.lexed_nonwhite_on_this_line = False
-
-                # Loop until a non-blank-line, non-comment, non-continuation token
-                token = self.eat_idle(self.nxt())
-                while token and token.tp in (Tokens.NEWLINE, Tokens.WHITE,):
-                    token = self.eat_idle(self.nxt())
-
-                if token and token.tp == Tokens.PLUS:
-                    # Cancelled newline; skip to next token
-                    token = self.nxt()
-                else:
-                    # Non-cancelled newline; yield the (already-passed) NEWLINE
-                    # Next loop-pass will get the first token on the next line
-                    yield Token(Tokens.NEWLINE, "\n")
-                continue  # Either way, restart this loop body
-
-            self.lexed_nonwhite_on_this_line = True
-            yield token
-            token = self.nxt()
+from ..lex import Lexer, Token, Tokens
 
 
 class ParserState(Enum):
-    # States of the parser, as they need be understood by the lexer
+    """ States of the parser, as they need be understood by the lexer. """
+
     PROGRAM = 0  # Typical program content
     EXPR = 1  # High-priority expressions
 
@@ -274,7 +113,7 @@ class DialectParser:
     def rewind(self):
         """ Rewind by one Token. Error if already in rewinding state. """
         if self.rewinding:
-            NetlistParseError.throw()
+            self.fail()
         self.rewinding = True
         self.nxt0 = self.nxt
         self.nxt = self.cur
@@ -303,7 +142,7 @@ class DialectParser:
         """ Assertion that our next token matches `tp`. 
         Note this advances if successful, effectively discarding `self.cur`. """
         if not self.match_any(*tp):
-            NetlistParseError.throw()
+            self.fail(f"Invalid token: {self.nxt}, expecting one of {tp}")
 
     def parse(self, f=None) -> Any:
         """ Perform parsing. Succeeds if top-level is parsable by function `f`.
@@ -312,7 +151,7 @@ class DialectParser:
         func = f if f else self.parse_expr
         self.root = func()
         if self.nxt is not None:  # Check whether there's more stuff
-            NetlistParseError.throw()
+            self.fail()
         return self.root
 
     def parse_subckt_start(self) -> StartSubckt:
@@ -364,7 +203,7 @@ class DialectParser:
                 break
             rv.append(parse_item())
         if i <= 0:  # Check whether the time-out triggered
-            NetlistParseError.throw()
+            self.fail()
         return rv
 
     def parse_node_list(self, term, *, MAXN=10_000) -> List[Ident]:
@@ -434,7 +273,7 @@ class DialectParser:
             if self.nxt and self.nxt.tp == Tokens.EQUALS:
                 self.rewind()
                 if not len(conns):  # Something went wrong!
-                    NetlistParseError.throw()
+                    self.fail()
                 conns.pop()
             # Grab the module name, at this point errantly in the `conns` list
             module = conns.pop()  # FIXME: check this matched `Ident` and not `Int`
@@ -560,16 +399,68 @@ class DialectParser:
                         break
                     self.expect(Tokens.COMMA)
                 if i <= 0:  # Check the time-out
-                    NetlistParseError.throw()
+                    self.fail()
                 return Call(func=name, args=args)
             return name
-        NetlistParseError.throw()
+        self.fail(f"Unexpected token while parsing expression-term: {self.cur}")
 
     def is_comment(self, tok: Token) -> bool:
         """ Boolean indication of whether `tok` begins a Comment """
         return tok.tp in (Tokens.DUBSLASH, Tokens.DOLLAR,) or (
             self.are_stars_comments_now() and tok.tp in (Tokens.DUBSTAR, Tokens.STAR)
         )
+
+    def parse_quote_string(self) -> str:
+        """ Parse a quoted string, ignoring internal token-types, 
+        solely appending them to a return-value string. 
+        FIXME: check for newlines, EOF, etc. """
+        self.expect(Tokens.DUBQUOTE)
+        rv = ""
+        while not self.match(Tokens.DUBQUOTE):
+            rv += self.peek().val
+            self.advance()
+        return rv
+
+    def fail(self, *args, **kwargs) -> None:
+        """ Failure Debug Helper. 
+        Primarily designed to capture state, and potentially break-points, when things go wrong. """
+        print(self)
+        NetlistParseError.throw(*args, **kwargs)
+
+    def is_expression_starter(self, tp: Tokens) -> Optional[Tuple[Tokens, Tokens]]:
+        """ Indicates whether token-type `tp` is a valid expression-*starting* Token-type. 
+        If not, returns None. 
+        If so, returns a tuple of the start token-type and its paired expression-ending token-type. """
+
+        pairs = {  # FIXME: specialize this by dialect
+            Tokens.TICK: Tokens.TICK,
+            Tokens.DUBQUOTE: Tokens.DUBQUOTE,
+            Tokens.LBRACKET: Tokens.RBRACKET,
+        }
+        if tp not in pairs:
+            return None
+        return tp, pairs[tp]
+
+    def parse_expr(self) -> Expr:
+        """ Parse an Expression 
+        expr0 | 'expr0' | {expr0} """
+        # Note: moves into our `EXPR` state require a `peek`/`expect` combo,
+        # otherwise we can mis-understand multiplication vs comment.
+        from .base import ParserState
+
+        # Check for "expression-mode starters", and update state if we find one.
+        pair = self.is_expression_starter(self.peek().tp)
+
+        if pair is None:
+            return self.parse_expr0()
+
+        # Got an "expression-mode starter" token - update state, and then parse.
+        self.state = ParserState.EXPR  # Note: this comes first
+        self.expect(pair[0])
+        e = self.parse_expr0()
+        self.state = ParserState.PROGRAM  # Note: this comes first
+        self.expect(pair[1])
+        return e
 
     """ Abstract Methods """
 
@@ -582,10 +473,6 @@ class DialectParser:
         """ Statement Parser 
         Dispatches to type-specific parsers based on prioritized set of matching rules. 
         Returns `None` at end. """
-        raise NotImplementedError
-
-    def parse_expr(self) -> Expr:
-        """ Parse an Expression """
         raise NotImplementedError
 
     def parse_model(self) -> Expr:

@@ -384,3 +384,25 @@ def test_spectre_midstream_comment():
             ParamDecl(name=Ident(name="area"), default=Float(val=1.1e11), distr=None),
         ],
     )
+
+
+def test_parse_capital_param():
+    from netlist import SpectreSpiceDialectParser, Ident, ParamDecls, ParamDecl, Int
+
+    txt = ".PARAM a = 3 \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+
+    assert i == ParamDecls(
+        params=[ParamDecl(name=Ident(name="a"), default=Int(val=3), distr=None)]
+    )
+
+
+def test_spice_include():
+    from netlist import SpectreSpiceDialectParser, Include, Path
+
+    txt = '.include "/path/to/file" \n'
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == Include(path=Path("/path/to/file"))
+

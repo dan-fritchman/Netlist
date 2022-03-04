@@ -1,10 +1,17 @@
+"""
+# Netlist Parsing 
+"""
+
 import os
 import codecs
-
 from pathlib import Path
 from warnings import warn
 from typing import List, Tuple
 
+# PyPi Imports
+from pydantic import ValidationError
+
+# Local Imports
 from .dialects import DialectParser
 from .data import *
 
@@ -116,7 +123,7 @@ class FileParser:
         elif s == "spice":
             dialect = NetlistDialects.SPECTRE_SPICE
         else:
-            NetlistParseError.throw()
+            self.fail()
 
         dcls = DialectParser.from_enum(dialect)
         self.dialect_parser = dcls.from_parser(self.dialect_parser)
@@ -136,16 +143,17 @@ class FileParser:
             si = SourceInfo(
                 line=self.dialect_parser.line_num, dialect=self.dialect_parser.enum,
             )
-            try:  # Catch errors in primary parsing routines
-                s = self.dialect_parser.parse_statement()
-            except (NetlistParseError, ValidationError) as e:
-                # Error Handling. Can either include `Unknown` statements, or re-raise.
-                warn(e)
-                s = Unknown("")  # FIXME: include the line-content in Unknowns
-                self.dialect_parser.eat_rest_of_statement()
-                # NetlistParseError.throw(
-                #     f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{lines} "
-                # )
+            s = self.dialect_parser.parse_statement()
+            # try:  # Catch errors in primary parsing routines
+            #     s = self.dialect_parser.parse_statement()
+            # except (NetlistParseError, ValidationError) as e:
+            #     # Error Handling. Can either include `Unknown` statements, or re-raise.
+            #     warn(e)
+            #     s = Unknown("")  # FIXME: include the line-content in Unknowns
+            #     self.dialect_parser.eat_rest_of_statement()
+            #     # self.fail(
+            #     #     f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{lines} "
+            #     # )
             if s is not None:  # None-value indicates EOF
                 e = Entry(s, si)
                 entries.append(e)
@@ -204,7 +212,7 @@ class HierarchyCollector:
         while True:
             e = self.nxt()
             if e is None:
-                NetlistParseError.throw()
+                self.fail()
             stmt = e.content
             if isinstance(stmt, EndSubckt):
                 break  # done with this module
@@ -226,7 +234,7 @@ class HierarchyCollector:
             if isinstance(stmt, EndLibSection):
                 break  # done with this section
             elif isinstance(stmt, StartLibSection):
-                NetlistParseError.throw()  # these don't nest; something's wrong
+                self.fail()  # these don't nest; something's wrong
             elif isinstance(stmt, StartSubckt):
                 s = self.collect_subckt(start=e)
                 nodes.append(Entry(s, e.source_info))
@@ -245,12 +253,15 @@ class HierarchyCollector:
             if isinstance(stmt, EndLib):
                 break  # done with this library
             elif isinstance(stmt, EndLibSection):
-                NetlistParseError.throw()  # something went wrong; lib section ends without beginning
+                # something went wrong; lib section ends without beginning
+                msg = "Invalid `EndLibSection` without `StartLibSection`"
+                self.fail(msg)
             elif isinstance(stmt, StartLibSection):
                 s = self.collect_lib_section(start=e)
                 sections.append(s)
             else:
-                NetlistParseError.throw()  # invalid type
+                msg = f"Invalid statement in library: {stmt}"
+                self.fail(msg)  # invalid type
         st = start.content
         return Library(name=st.name, sections=sections)
 

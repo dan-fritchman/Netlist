@@ -7,15 +7,20 @@ primarily in the form of dataclasses.
 
 """
 
+# Std-Lib Imports
 from enum import Enum
 from pathlib import Path
 from typing import Optional, Any, Dict, Union, List, Tuple
 
-from pydantic import ValidationError
+# PyPi Imports
 from pydantic.dataclasses import dataclass
+
+# from pydantic import ValidationError
 
 
 class NetlistParseError(Exception):
+    """ Netlist Parse Error """
+
     @staticmethod
     def throw(*args, **kwargs):
         """ Exception-raising debug wrapper. Breakpoint to catch `NetlistParseError`s. """
@@ -23,6 +28,8 @@ class NetlistParseError(Exception):
 
 
 class NetlistDialects(Enum):
+    """ Enumerated, Supported Netlist Dialects """
+
     SPECTRE = 1
     SPECTRE_SPICE = 2
     SPICE = 3
@@ -39,6 +46,18 @@ def to_json(arg) -> str:
     return json.dumps(arg, indent=2, default=pydantic_encoder)
 
 
+# Keep a list of datatype defined here,
+# primarily so that we can update their forward-references at the end of this module.
+datatypes = []
+
+
+def datatype(cls: type) -> type:
+    """ Register a class as a datatype. """
+    datatypes.append(cls)
+    return cls
+
+
+@datatype
 @dataclass
 class SourceInfo:
     """ Parser Source Information """
@@ -47,11 +66,15 @@ class SourceInfo:
     dialect: "NetlistDialects"
 
 
+@datatype
 @dataclass(eq=True, frozen=True)
 class Ident:
+    """ Identifier """
+
     name: str
 
 
+@datatype
 @dataclass
 class HierPath:
     """ Hierarchical Path Identifier """
@@ -59,6 +82,7 @@ class HierPath:
     path: List[Ident]
 
 
+@datatype
 @dataclass
 class ParamDecl:
     """ Parameter Declaration 
@@ -69,6 +93,7 @@ class ParamDecl:
     distr: Optional[str] = None
 
 
+@datatype
 @dataclass
 class ParamDecls:
     """ Parameter Declarations, 
@@ -77,6 +102,7 @@ class ParamDecls:
     params: List[ParamDecl]
 
 
+@datatype
 @dataclass
 class ParamVal:
     """ Parameter Value-Set """
@@ -85,6 +111,7 @@ class ParamVal:
     val: "Expr"
 
 
+@datatype
 @dataclass
 class Instance:
     """ Subckt/Module Instance """
@@ -95,6 +122,7 @@ class Instance:
     params: List[ParamVal]
 
 
+@datatype
 @dataclass
 class Primitive:
     """ Simulator-Defined Primitive Instance 
@@ -107,12 +135,14 @@ class Primitive:
     kwargs: List[ParamVal]
 
 
+@datatype
 @dataclass
 class Options:
     name: Optional[Ident]
     vals: List[ParamVal]
 
 
+@datatype
 @dataclass
 class StartSubckt:
     name: Ident  # Module/ Subcircuit Name
@@ -120,11 +150,13 @@ class StartSubckt:
     params: List[ParamDecl]  # Parameter Declarations
 
 
+@datatype
 @dataclass
 class EndSubckt:
     name: Optional[Ident]
 
 
+@datatype
 @dataclass
 class SubcktDef:
     """ Sub-Circuit / Module Definition """
@@ -135,6 +167,7 @@ class SubcktDef:
     entries: List["SubcktEntry"]
 
 
+@datatype
 @dataclass
 class ModelDef:
     name: Ident  # Model Name
@@ -143,6 +176,7 @@ class ModelDef:
     params: List[ParamDecl]  # Parameter Declarations & Defaults
 
 
+@datatype
 @dataclass
 class ModelVariant:
     model: Ident  # Model Family Name
@@ -151,6 +185,7 @@ class ModelVariant:
     params: List[ParamDecl]  # Parameter Declarations & Defaults
 
 
+@datatype
 @dataclass
 class ModelFamily:
     name: Ident  # Model Family Name
@@ -158,54 +193,64 @@ class ModelFamily:
     variants: List[ModelVariant]  # Variants
 
 
+@datatype
 @dataclass
 class Include:
     path: Path
 
 
+@datatype
 @dataclass
 class AhdlInclude:
     path: Path
 
 
+@datatype
 @dataclass
 class StartLib:
     name: Ident
 
 
+@datatype
 @dataclass
 class EndLib:
     name: Optional[Ident]
 
 
+@datatype
 @dataclass
 class StartLibSection:
     name: Ident
 
 
+@datatype
 @dataclass
 class EndLibSection:
     name: Ident
 
 
+@datatype
 @dataclass
 class LibSection:
     name: Ident
     entries: List["Entry"]
 
 
+@datatype
 @dataclass
 class Library:
     name: Ident
     sections: List[LibSection]
 
 
+@datatype
 @dataclass
 class UseLib:
     path: Path
     section: Ident
 
 
+@datatype
 @dataclass
 class End:
     """ Empty class represents `.end` Statements """
@@ -213,6 +258,7 @@ class End:
     ...
 
 
+@datatype
 @dataclass
 class Variation:
     """ Single-Parameter Variation Declaration """
@@ -222,6 +268,7 @@ class Variation:
     std: "Expr"
 
 
+@datatype
 @dataclass
 class StatisticsBlock:
     """ Statistical Descriptions """
@@ -230,6 +277,7 @@ class StatisticsBlock:
     mismatch: Optional[List[Variation]]
 
 
+@datatype
 @dataclass
 class Unknown:
     """ Unknown Netlist Statement. Stored as an un-parsed string. """
@@ -237,6 +285,7 @@ class Unknown:
     txt: str
 
 
+@datatype
 @dataclass
 class DialectChange:
     """ Netlist Dialect Changes, e.g. `simulator lang=xyz` """
@@ -283,56 +332,66 @@ Statement = Union[SubcktStatement, MostFileStatements]
 FileNode = Union[Library, SubcktDef, SubcktStatement, MostFileStatements]
 
 
+@datatype
 @dataclass
 class Entry:
     content: Statement
     source_info: Optional[SourceInfo] = None
 
 
+@datatype
 @dataclass
 class FileEntryFlat:
     content: FileNode
     source_info: Optional[SourceInfo] = None
 
 
+@datatype
 @dataclass
 class FileEntry:
     content: FileNode
     source_info: Optional[SourceInfo] = None
 
 
+@datatype
 @dataclass
 class SubcktEntry:
     content: SubcktNode
     source_info: Optional[SourceInfo] = None
 
 
+@datatype
 @dataclass
 class SourceFile:
     path: Path  # Source File Path
     contents: List[FileEntry]  # Statements and their associated SourceInfo
 
 
+@datatype
 @dataclass
 class Program:
     files: List[SourceFile]  # List of Source-File Contents
 
 
+@datatype
 @dataclass
 class Int:
     val: int
 
 
+@datatype
 @dataclass
 class Float:
     val: float
 
 
+@datatype
 @dataclass
 class MetricNum:
     val: str  # No conversion, just stored as string for now
 
 
+@datatype
 @dataclass
 class Call:
     """ 
@@ -351,12 +410,14 @@ class Call:
     args: List["Expr"]  # Arguments List
 
 
+@datatype
 @dataclass
 class TypedArg:
     tp: Ident
     name: Ident
 
 
+@datatype
 @dataclass
 class Return:
     val: "Expr"
@@ -367,6 +428,7 @@ class Return:
 FuncStatement = Union[Return]
 
 
+@datatype
 @dataclass
 class FunctionDef:
     name: Ident
@@ -378,6 +440,7 @@ class FunctionDef:
 Expr = Union["UnOp", "BinOp", "TernOp", Int, Float, MetricNum, Ident, Call]
 
 
+@datatype
 @dataclass
 class UnOp:
     """ Unary Operation """
@@ -386,6 +449,7 @@ class UnOp:
     targ: Expr
 
 
+@datatype
 @dataclass
 class BinOp:
     """ Binary Operation """
@@ -395,6 +459,7 @@ class BinOp:
     right: Expr
 
 
+@datatype
 @dataclass
 class TernOp:
     """ Ternary Operation """
@@ -405,22 +470,6 @@ class TernOp:
 
 
 # Update all the forward type-references
-UnOp.__pydantic_model__.update_forward_refs()
-BinOp.__pydantic_model__.update_forward_refs()
-Variation.__pydantic_model__.update_forward_refs()
-StatisticsBlock.__pydantic_model__.update_forward_refs()
-Call.__pydantic_model__.update_forward_refs()
-Return.__pydantic_model__.update_forward_refs()
-Primitive.__pydantic_model__.update_forward_refs()
-ParamVal.__pydantic_model__.update_forward_refs()
-ParamDecl.__pydantic_model__.update_forward_refs()
-ParamDecls.__pydantic_model__.update_forward_refs()
-SourceInfo.__pydantic_model__.update_forward_refs()
-Entry.__pydantic_model__.update_forward_refs()
-SubcktDef.__pydantic_model__.update_forward_refs()
-LibSection.__pydantic_model__.update_forward_refs()
-SourceFile.__pydantic_model__.update_forward_refs()
-FunctionDef.__pydantic_model__.update_forward_refs()
-FileEntry.__pydantic_model__.update_forward_refs()
-FunctionDef.__pydantic_model__.update_forward_refs()
-Program.__pydantic_model__.update_forward_refs()
+for tp in datatypes:
+    tp.__pydantic_model__.update_forward_refs()
+

@@ -28,6 +28,7 @@ class SpectreMixin:
 
 class SpectreSpiceDialectParser(SpectreMixin, SpiceDialectParser):
     """ Spice-Style Syntax, as Interpreted by Spectre. 
+
     Primarily differs from the base SpiceDialect in its capacity for
     `simulator lang` statements which produce `DialectChanges`. """
 
@@ -80,7 +81,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
                 return func()
 
         # No match - error time.
-        NetlistParseError.throw()
+        self.fail()
 
     def parse_named(self):
         """ Parse an identifier-named statement. 
@@ -90,7 +91,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         before dispatching to more detailed parsing methods. """
         self.expect(Tokens.IDENT)
         if self.nxt is None:
-            NetlistParseError.throw()
+            self.fail()
         if self.nxt.tp == Tokens.OPTIONS:
             self.rewind()
             return self.parse_options()
@@ -98,7 +99,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
             self.rewind()
             return self.parse_instance()
         # No match - error time.
-        NetlistParseError.throw()
+        self.fail()
 
     def parse_model(self) -> Union[ModelDef, ModelFamily]:
         """ Parse a Model statement """
@@ -153,7 +154,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         while not self.match(Tokens.RBRACKET):
             self.expect(Tokens.IDENT)
             if self.cur.val != "vary":
-                NetlistParseError.throw()
+                self.fail()
             self.expect(Tokens.IDENT)
             name = Ident(self.cur.val)
 
@@ -164,20 +165,20 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
                 self.expect(Tokens.IDENT)
                 if self.cur.val == "dist":
                     if dist is not None:
-                        NetlistParseError.throw()
+                        self.fail()
                     self.expect(Tokens.EQUALS)
                     self.expect(Tokens.IDENT)
                     dist = str(self.cur.val)
                 elif self.cur.val == "std":
                     if std is not None:
-                        NetlistParseError.throw()
+                        self.fail()
                     self.expect(Tokens.EQUALS)
                     std = self.parse_expr()
                 elif self.cur.val == "percent":
                     self.expect(Tokens.EQUALS)
                     percent = self.parse_expr()
                 else:
-                    NetlistParseError.throw()
+                    self.fail()
             vars.append(Variation(name, dist, std))  # FIXME: roll in `percent`
 
         self.expect(Tokens.NEWLINE)
@@ -197,14 +198,14 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
             self.expect(Tokens.IDENT)
             if self.cur.val == "process":
                 if process is not None:
-                    NetlistParseError.throw()
+                    self.fail()
                 process = self.parse_variations()
             elif self.cur.val == "mismatch":
                 if mismatch is not None:
-                    NetlistParseError.throw()
+                    self.fail()
                 mismatch = self.parse_variations()
             else:
-                NetlistParseError.throw()
+                self.fail()
 
         self.expect(Tokens.NEWLINE)
         return StatisticsBlock(process=process, mismatch=mismatch)
@@ -212,8 +213,8 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
     def parse_ahdl(self):
         """ Parse an `ahdl_include` statement """
         self.expect(Tokens.AHDL)
-        self.expect(Tokens.QUOTESTR)
-        rv = AhdlInclude(self.cur.val)
+        path = self.parse_quote_string()
+        rv = AhdlInclude(path)
         self.expect(Tokens.NEWLINE)
         return rv
 
@@ -232,11 +233,6 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
     def are_stars_comments_now(self) -> bool:
         # Stars are comments only to begin lines, and at the beginning of a file. (We think?)
         return not self.lex.lexed_nonwhite_on_this_line
-
-    def parse_expr(self) -> Expr:
-        """ Parse an Expression """
-        # No parameter-literal characters; defer to base-class `expr0`.
-        return self.parse_expr0()
 
     def parse_start_lib(self):
         self.expect(Tokens.LIBRARY)
@@ -269,8 +265,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
     def parse_include(self) -> Union[Include, UseLib]:
         """ Parse an Include Statement """
         self.expect(Tokens.INCLUDE)
-        self.expect(Tokens.QUOTESTR)
-        path = self.cur.val[1:-1]  # Strip out the quotes
+        path = self.parse_quote_string()
         if self.match(Tokens.NEWLINE):  # Non-sectioned `Include`
             return Include(path)
         # Otherwise expect a library `Section`
@@ -310,7 +305,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
                 break
             self.expect(Tokens.COMMA)
         if i <= 0:  # Check the time-out
-            NetlistParseError.throw()
+            self.fail()
 
         self.expect(Tokens.LBRACKET)
         self.expect(Tokens.NEWLINE)
