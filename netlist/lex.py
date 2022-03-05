@@ -4,7 +4,7 @@
 
 # Std-Lib Imports
 import re
-from typing import Iterable
+from typing import Iterable, Optional
 
 # PyPi Imports
 from pydantic.dataclasses import dataclass

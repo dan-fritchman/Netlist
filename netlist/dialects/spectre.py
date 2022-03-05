@@ -1,6 +1,13 @@
+"""
+# Spectre-Dialect Parsing 
+"""
+
+from typing import Optional, Union, List 
+
+# Local Imports
 from ..data import *
+from ..lex import Tokens
 from .spice import DialectParser, SpiceDialectParser
-from .base import Tokens
 
 
 class SpectreMixin:

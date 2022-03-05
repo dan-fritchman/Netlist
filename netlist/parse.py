@@ -4,9 +4,10 @@
 
 import os
 import codecs
+from enum import Enum
 from pathlib import Path
 from warnings import warn
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 # PyPi Imports
 from pydantic import ValidationError
@@ -16,22 +17,47 @@ from .dialects import DialectParser
 from .data import *
 
 
-def parse(path: os.PathLike, *, dialect=None) -> Program:
-    """ Parse a Multi-File Netlist-Program """
-    d = dialect or default_dialect(path)
-    p = Parser(d)
+class ErrorMode(Enum):
+    """ Enumerated Responses to Parsing Errors """
+
+    RAISE = 0  # Raise any generated exceptions
+    STORE = 1  # Store error-generating content in `Unknown` elements
+
+
+def parse(
+    path: os.PathLike,
+    *,
+    dialect: Optional[NetlistDialects] = None,
+    errormode: ErrorMode = ErrorMode.RAISE,
+) -> Program:
+    """ 
+    Primary netist-parsing entry point.  
+    Parse a multi-file netlist-`Program` starting at file `path`. 
+    
+    Recurses into `path`'s dependencies as indicated by `Include` and `Library` directives.
+
+    Optional argument `dialect` dictates the initial netlist-dialect. 
+    If not provided, the default is inferred from the file-extension of `path`.
+    """
+
+    dialect = dialect or default_dialect(path)
+    p = Parser(dialect, errormode)
     p.parse(path)
     for e in p.entries():
-        if isinstance(e.content, Unknown):
+        if isinstance(e, Unknown):
             warn(f"Unknown Netlist Entry {e}")
     return p.program
 
 
 def default_dialect(path: os.PathLike) -> NetlistDialects:
-    """ Infer a default dialect from a file name, particularly its suffix. 
+    """ 
+    Infer a default dialect from a file name, particularly its suffix. 
+    
     For files of suffix `scs` this is straightforwardly set to SPECTRE. 
     All other suffixes are less clear without knowing more context. 
-    They are set to the most flexible SPECTRE_SPICE, which includes dialect-changes. """
+    They are set to the most flexible SPECTRE_SPICE, 
+    which generally uses SPICE-style syntax, but also includes dialect-changes. 
+    """
 
     p = Path(path).absolute()
     if not p.exists() or not p.is_file():
@@ -44,11 +70,14 @@ def default_dialect(path: os.PathLike) -> NetlistDialects:
 class Parser:
     """ Multi-File "Netlist Program" Parser """
 
-    def __init__(self, dialect: NetlistDialects):
+    def __init__(
+        self, dialect: NetlistDialects, errormode: ErrorMode = ErrorMode.RAISE
+    ):
         self.deps: List[Path] = []
         self.program = Program([])
+        self.errormode = errormode
         self.dialect = dialect
-        self.file_parser = FileParser(dialect)
+        self.file_parser = FileParser(dialect, errormode)
 
     def parse_file(self, p: Path):
         """ Parse a single file, including any follow-on steps """
@@ -56,7 +85,7 @@ class Parser:
         # Perform our primary file-parsing, to a list of Entries
         path, stmts = self.file_parser.parse(p)
         # Filter out a few things
-        stmts = [e for e in stmts if not isinstance(e.content, DialectChange)]
+        stmts = [e for e in stmts if not isinstance(e, DialectChange)]
         # And form into a scope-hierarchical tree
         return hierarchicalize(path, stmts)
 
@@ -76,8 +105,7 @@ class Parser:
 
     def recurse(self, f: SourceFile):
         """ Parse included-files in SourceFile `f` """
-        for e in f.contents:
-            s = e.content
+        for s in f.contents:
             if isinstance(s, (Include, UseLib)):
                 # Differentiate absolute vs relative paths, relative to active source-file
                 incp = s.path if s.path.is_absolute() else f.path.parent / s.path
@@ -108,9 +136,12 @@ class FileParser:
     """ Single-File Parser 
     Produces a flat list of Statement-Entries """
 
-    def __init__(self, dialect: NetlistDialects):
+    def __init__(
+        self, dialect: NetlistDialects, errormode: ErrorMode = ErrorMode.RAISE
+    ):
         self.dialect = dialect
         self.dialect_parser = None
+        self.errormode = errormode
         self.line_num = 1
 
     def notify(self, reason: DialectChange):
@@ -123,12 +154,12 @@ class FileParser:
         elif s == "spice":
             dialect = NetlistDialects.SPECTRE_SPICE
         else:
-            self.fail()
+            self.fail(f"Invalid `simulator lang` {s}")
 
         dcls = DialectParser.from_enum(dialect)
         self.dialect_parser = dcls.from_parser(self.dialect_parser)
 
-    def _parse_file(self) -> List[Entry]:
+    def _parse_file(self) -> List[Statement]:
         """ Parse the (open) file-pointer at `self.fp` """
 
         # Create our iterator over file-lines, and core dialect-parser
@@ -137,119 +168,132 @@ class FileParser:
         self.dialect_parser = dcls.from_lines(lines=lines, parent=self)
         self.dialect_parser.start()
 
-        entries = []
+        stmts = []
         s = True
         while s:  # Main loop over statements
             si = SourceInfo(
                 line=self.dialect_parser.line_num, dialect=self.dialect_parser.enum,
             )
-            s = self.dialect_parser.parse_statement()
-            # try:  # Catch errors in primary parsing routines
-            #     s = self.dialect_parser.parse_statement()
-            # except (NetlistParseError, ValidationError) as e:
-            #     # Error Handling. Can either include `Unknown` statements, or re-raise.
-            #     warn(e)
-            #     s = Unknown("")  # FIXME: include the line-content in Unknowns
-            #     self.dialect_parser.eat_rest_of_statement()
-            #     # self.fail(
-            #     #     f"{str(e)} Error Parsing {self.path} Line {start_line_num}: \n{lines} "
-            #     # )
+
+            try:  # Catch errors in primary parsing routines
+                s = self.dialect_parser.parse_statement()
+            except NetlistParseError as e:
+                # Error Handling. Can either include `Unknown` statements, or re-raise.
+                if self.errormode == ErrorMode.RAISE:
+                    raise e
+                # Otherwise, we include `Unknown` statements
+                warn(e)  # Issue a warning
+                s = Unknown("")  # FIXME: include the line-content in Unknowns
+                self.dialect_parser.eat_rest_of_statement()
+
             if s is not None:  # None-value indicates EOF
-                e = Entry(s, si)
-                entries.append(e)
+                s.source_info = si
+                stmts.append(s)
 
-        return entries
+        return stmts
 
-    def parse(self, path: Path) -> Tuple[Path, List[Entry]]:
+    def parse(self, path: Path) -> Tuple[Path, List[Statement]]:
         """ Parse the netlist `SourceFile` at `path`. """
         with codecs.open(path, "r", encoding="utf-8", errors="replace") as f:
             self.path = path
             self.fp = f
-            entries = self._parse_file()
-        return (path, entries)
+            stmts = self._parse_file()
+        return (path, stmts)
 
 
-def hierarchicalize(p: Path, entries: List[Entry]) -> SourceFile:
-    nodes = HierarchyCollector(entries).collect()
+def hierarchicalize(p: Path, stmts: List[Statement]) -> SourceFile:
+    """ Convert a flat list of Statements into a hierarchical tree """
+    nodes = HierarchyCollector(stmts).collect()
     return SourceFile(p, nodes)
 
 
 class HierarchyCollector:
-    """ Second-pass hierarchicy-collector to create multi-statement tree structure, e.g.:
+    """ 
+    Hierarchy-collector to create multi-statement tree structure, e.g.:
     * Libraries and Sections
-    * (Potentially nested) Sub-Circuit definitions. """
+    * (Potentially nested) sub-circuit definitions. 
+    """
 
-    def __init__(self, entries: List[Entry]):
-        self.entries = entries
+    def __init__(self, stmts: List[Statement]):
+        self.stmts = iter(stmts)
 
-    def nxt(self) -> Entry:
+    def nxt(self) -> Optional[Statement]:
+        """ Get our next `Statement`, or None if exhausted """
+        return next(self.stmts, None)
         try:
-            return self.entries.pop(0)
+            return self.stmts.pop(0)
         except IndexError:
             return None
 
-    def collect(self) -> List[FileNode]:
+    def collect(self) -> List[Entry]:
         """ Primary Entry Point. 
         Transform a list of flat file-entries to a hierarchical tree of file-nodes. """
         nodes = []
         while True:
-            e = self.nxt()
-            if e is None:  # EOF
-                break
-            stmt = e.content
+            stmt = self.nxt()
+            if stmt is None:
+                break  # library-end on file-end
+
             if isinstance(stmt, StartSubckt):
-                s = self.collect_subckt(start=e)
-                nodes.append(FileEntry(s, e.source_info))
+                s = self.collect_subckt(start=stmt)
             elif isinstance(stmt, StartLib):
-                s = self.collect_lib(start=e)
-                nodes.append(FileEntry(s, e.source_info))
+                s = self.collect_lib(start=stmt)
             else:
-                nodes.append(FileEntry(e.content, e.source_info))
+                s = stmt
+            nodes.append(s)
         return nodes
 
     def collect_subckt(self, start: StartSubckt) -> SubcktDef:
+        """ Collect a sub-circuit definition """
+
         nodes = []
         while True:
-            e = self.nxt()
-            if e is None:
-                self.fail()
-            stmt = e.content
+            stmt = self.nxt()
+            if stmt is None:
+                break  # library-end on file-end
+
             if isinstance(stmt, EndSubckt):
                 break  # done with this module
             elif isinstance(stmt, StartSubckt):
                 s = self.collect_subckt(start=e)
-                nodes.append(SubcktEntry(s, e.source_info))
             else:  # Anything else, copy along
-                nodes.append(SubcktEntry(e.content, e.source_info))
-        st = start.content
-        return SubcktDef(name=st.name, ports=st.ports, params=st.params, entries=nodes)
+                s = stmt
+            nodes.append(s)
+
+        return SubcktDef(
+            name=start.name, ports=start.ports, params=start.params, entries=nodes
+        )
 
     def collect_lib_section(self, start: StartLibSection) -> LibSection:
+        """ Collect a library section """
+
         nodes = []
         while True:
-            e = self.nxt()
-            if e is None:
-                break  # section-end on file-end
-            stmt = e.content
+            stmt = self.nxt()
+            if stmt is None:
+                break  # library-end on file-end
+
             if isinstance(stmt, EndLibSection):
                 break  # done with this section
             elif isinstance(stmt, StartLibSection):
                 self.fail()  # these don't nest; something's wrong
             elif isinstance(stmt, StartSubckt):
-                s = self.collect_subckt(start=e)
-                nodes.append(Entry(s, e.source_info))
+                s = self.collect_subckt(start=stmt)
             else:  # Anything else, copy along
-                nodes.append(Entry(e.content, e.source_info))
-        start = start.content
+                s = stmt
+            nodes.append(s)
+
         return LibSection(name=start.name, entries=nodes)
 
     def collect_lib(self, start: StartLib) -> Library:
+        """ Collect a library definition """
+
         sections = []
         while True:
-            e = self.nxt()
-            if e is None:
+            stmt = self.nxt()
+            if stmt is None:
                 break  # library-end on file-end
-            stmt = e.content
+
             if isinstance(stmt, EndLib):
                 break  # done with this library
             elif isinstance(stmt, EndLibSection):
@@ -262,6 +306,6 @@ class HierarchyCollector:
             else:
                 msg = f"Invalid statement in library: {stmt}"
                 self.fail(msg)  # invalid type
-        st = start.content
-        return Library(name=st.name, sections=sections)
+
+        return Library(name=start.name, sections=sections)
 

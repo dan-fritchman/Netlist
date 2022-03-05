@@ -10,12 +10,10 @@ primarily in the form of dataclasses.
 # Std-Lib Imports
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Any, Dict, Union, List, Tuple
+from typing import Optional, Union, List, Tuple
 
 # PyPi Imports
 from pydantic.dataclasses import dataclass
-
-# from pydantic import ValidationError
 
 
 class NetlistParseError(Exception):
@@ -30,44 +28,67 @@ class NetlistParseError(Exception):
 class NetlistDialects(Enum):
     """ Enumerated, Supported Netlist Dialects """
 
-    SPECTRE = 1
-    SPECTRE_SPICE = 2
-    SPICE = 3
-    HSPICE = 4
-    NGSPICE = 5
+    SPECTRE = "spectre"
+    SPECTRE_SPICE = "spectre_spice"
+    SPICE = "spice"
+    HSPICE = "hspice"
+    NGSPICE = "ngspice"
+    XYCE = "xyce"
+    CDL = "cdl"
+
+    @staticmethod
+    def get(spec: "NetlistFormatSpec") -> "NetlistDialects":
+        """ Get the format specified by `spec`, in either enum or string terms. 
+        Only does real work in the case when `spec` is a string, otherwise returns it unchanged. """
+        if isinstance(spec, (NetlistDialects, str)):
+            return NetlistDialects(spec)
+        raise TypeError
+
+
+# Type-alias for specifying format, either in enum or string terms
+NetlistFormatSpec = Union[NetlistDialects, str]
 
 
 def to_json(arg) -> str:
-    """ Dump any `pydantic.dataclass` or simple combination thereof to JSON string. 
-    (Unfortunately doesn't seem to like our `Dict` types yet.) """
+    """ Dump any `pydantic.dataclass` or simple combination thereof to JSON string. """
     import json
     from pydantic.json import pydantic_encoder
 
     return json.dumps(arg, indent=2, default=pydantic_encoder)
 
 
-# Keep a list of datatype defined here,
+@dataclass
+class SourceInfo:
+    """ Parser Source Information """
+
+    line: int  # Source-File Line Number
+    dialect: "NetlistDialects"  # Netlist Dialect
+
+
+# Keep a list of datatypes defined here,
 # primarily so that we can update their forward-references at the end of this module.
-datatypes = []
+datatypes = [SourceInfo]
 
 
 def datatype(cls: type) -> type:
     """ Register a class as a datatype. """
+
+    # Add an `Optional[SourceInfo]` field to the class, with a default value of `None`.
+    # Creates the `__annotations__` field if it does not already exist.
+    anno = getattr(cls, "__annotations__", {})
+    anno["source_info"] = Optional[SourceInfo]
+    cls.__annotations__ = anno
+    cls.source_info = None
+
+    # Convert it to a `pydantic.dataclasses.dataclass`
+    cls = dataclass(cls)
+
+    # And add it to the list of datatypes
     datatypes.append(cls)
     return cls
 
 
 @datatype
-@dataclass
-class SourceInfo:
-    """ Parser Source Information """
-
-    line: int
-    dialect: "NetlistDialects"
-
-
-@datatype
-@dataclass(eq=True, frozen=True)
 class Ident:
     """ Identifier """
 
@@ -75,7 +96,6 @@ class Ident:
 
 
 @datatype
-@dataclass
 class HierPath:
     """ Hierarchical Path Identifier """
 
@@ -83,7 +103,6 @@ class HierPath:
 
 
 @datatype
-@dataclass
 class ParamDecl:
     """ Parameter Declaration 
     Includes Optional Distribution Information """
@@ -94,7 +113,6 @@ class ParamDecl:
 
 
 @datatype
-@dataclass
 class ParamDecls:
     """ Parameter Declarations, 
     as via the `param` keywords. """
@@ -103,7 +121,6 @@ class ParamDecls:
 
 
 @datatype
-@dataclass
 class ParamVal:
     """ Parameter Value-Set """
 
@@ -112,23 +129,26 @@ class ParamVal:
 
 
 @datatype
-@dataclass
 class Instance:
-    """ Subckt/Module Instance """
+    """ Subckt / Module Instance """
 
-    name: Ident
-    module: Ident
+    name: Ident  # Instance Name
+    module: Ident  # Module / Subcircuit Name
+
+    # Connections, either by-position or by-name
     conns: Union[List[Ident], List[Tuple[Ident, Ident]]]
-    params: List[ParamVal]
+    params: List[ParamVal]  # Parameter Values
 
 
 @datatype
-@dataclass
 class Primitive:
-    """ Simulator-Defined Primitive Instance 
+    """ 
+    Primitive Instance 
+    
     Note at parsing-time, before models are sorted out, 
     it is not always clear what is a port, model name, and parameter value. 
-    Primitives instead store positional and keyword arguments `args` and `kwargs`. """
+    Primitives instead store positional and keyword arguments `args` and `kwargs`. 
+    """
 
     name: Ident
     args: List["Expr"]
@@ -136,40 +156,43 @@ class Primitive:
 
 
 @datatype
-@dataclass
 class Options:
-    name: Optional[Ident]
-    vals: List[ParamVal]
+    """ Simulation Options """
+
+    name: Optional[Ident]  # Option Name. FIXME: could this be removed
+    vals: List[ParamVal]  # List of name: value pairs
 
 
 @datatype
-@dataclass
 class StartSubckt:
+    """ Start of a Subckt / Module Definition """
+
     name: Ident  # Module/ Subcircuit Name
     ports: List[Ident]  # Port List
     params: List[ParamDecl]  # Parameter Declarations
 
 
 @datatype
-@dataclass
 class EndSubckt:
+    """ End of a Subckt / Module Definition """
+
     name: Optional[Ident]
 
 
 @datatype
-@dataclass
 class SubcktDef:
     """ Sub-Circuit / Module Definition """
 
     name: Ident  # Module/ Subcircuit Name
     ports: List[Ident]  # Port List
     params: List[ParamDecl]  # Parameter Declarations
-    entries: List["SubcktEntry"]
+    entries: List["Entry"]
 
 
 @datatype
-@dataclass
 class ModelDef:
+    """ Model Definition """
+
     name: Ident  # Model Name
     mtype: Ident  # Model Type
     args: List[Ident]  # Positional Arguments
@@ -177,8 +200,9 @@ class ModelDef:
 
 
 @datatype
-@dataclass
 class ModelVariant:
+    """ Model Variant within a `ModelFamily` """
+
     model: Ident  # Model Family Name
     variant: Ident  # Variant Name
     args: List[Ident]  # Positional Arguments
@@ -186,72 +210,85 @@ class ModelVariant:
 
 
 @datatype
-@dataclass
 class ModelFamily:
+    """ Model Family 
+    A set of related, identically named models, generally separated by limiting parameters such as {lmin, lmax} or {wmin, wmax}. """
+
     name: Ident  # Model Family Name
     mtype: Ident  # Model Type
     variants: List[ModelVariant]  # Variants
 
 
 @datatype
-@dataclass
 class Include:
+    """ Include (a File) Statement """
+
     path: Path
 
 
 @datatype
-@dataclass
 class AhdlInclude:
+    """ Analog HDL Include (a File) Statement """
+
     path: Path
 
 
 @datatype
-@dataclass
 class StartLib:
+    """ Start of a `Library`"""
+
     name: Ident
 
 
 @datatype
-@dataclass
 class EndLib:
+    """ End of a `Library`"""
+
     name: Optional[Ident]
 
 
 @datatype
-@dataclass
 class StartLibSection:
+    """ Start of a `LibrarySection` """
+
     name: Ident
 
 
 @datatype
-@dataclass
 class EndLibSection:
+    """ End of a `LibrarySection` """
+
     name: Ident
 
 
 @datatype
-@dataclass
 class LibSection:
-    name: Ident
-    entries: List["Entry"]
+    """ Library Section 
+    A named section of a library, commonly incorporated with a `UseLib` or similar. """
+
+    name: Ident  # Section Name
+    entries: List["Entry"]  # Entry List
 
 
 @datatype
-@dataclass
 class Library:
-    name: Ident
-    sections: List[LibSection]
+    """ Library, as Generated by the Spice `.lib` Definition Card
+    Includes a list of named `LibSection`s which can be included by their string-name, 
+    as common for "corner" inclusions e.g. `.inc "mylib.sp" "tt"`  """
+
+    name: Ident  # Library Name
+    sections: List[LibSection]  # Library Sections
 
 
 @datatype
-@dataclass
 class UseLib:
-    path: Path
-    section: Ident
+    """ Use a Library """
+
+    path: Path  # Library File Path
+    section: Ident  # Section Name
 
 
 @datatype
-@dataclass
 class End:
     """ Empty class represents `.end` Statements """
 
@@ -259,17 +296,15 @@ class End:
 
 
 @datatype
-@dataclass
 class Variation:
     """ Single-Parameter Variation Declaration """
 
-    name: Ident
-    dist: str
-    std: "Expr"
+    name: Ident  # Parameter Name
+    dist: str  # Distribution Name/Type
+    std: "Expr"  # Standard Deviation
 
 
 @datatype
-@dataclass
 class StatisticsBlock:
     """ Statistical Descriptions """
 
@@ -278,7 +313,6 @@ class StatisticsBlock:
 
 
 @datatype
-@dataclass
 class Unknown:
     """ Unknown Netlist Statement. Stored as an un-parsed string. """
 
@@ -286,17 +320,14 @@ class Unknown:
 
 
 @datatype
-@dataclass
 class DialectChange:
     """ Netlist Dialect Changes, e.g. `simulator lang=xyz` """
 
     dialect: str
 
 
-# The big union-type of everything that makes a valid single-line statement
-
-# A shorthand for a bunch of stuff, "mixed in" to several other type-unions.
-MostStatements = Union[
+# Union of "flat" statements lacking (substantial) hierarchy
+FlatStatement = Union[
     Instance,
     Primitive,
     ParamDecls,
@@ -306,93 +337,69 @@ MostStatements = Union[
     DialectChange,
     "FunctionDef",
     Unknown,
-]
-
-# (Flat) statements which can appear in sub-circuit definitions
-SubcktStatement = Union[StartSubckt, EndSubckt, MostStatements]
-
-# Nodes which can be the (direct) children of sub-circuit definitions
-SubcktNode = Union[SubcktDef, MostStatements]
-
-MostFileStatements = Union[
     Options,
     Include,
     AhdlInclude,
-    StartLib,
-    EndLib,
     UseLib,
-    StartLibSection,
-    EndLibSection,
     StatisticsBlock,
-    End,
 ]
-Statement = Union[SubcktStatement, MostFileStatements]
 
-# Nodes which can be the (direct) children of `SourceFiles`
-FileNode = Union[Library, SubcktDef, SubcktStatement, MostFileStatements]
+# Statements which indicate the beginning and end of hierarchical elements,
+# and ultimately disappear into the structured AST
+DelimStatement = Union[
+    StartLib, EndLib, StartLibSection, EndLibSection, End,
+]
 
+# Statements
+# The union of types which can appear in first-pass parsing netlist
+Statement = Union[FlatStatement, DelimStatement]
 
-@datatype
-@dataclass
-class Entry:
-    content: Statement
-    source_info: Optional[SourceInfo] = None
-
-
-@datatype
-@dataclass
-class FileEntryFlat:
-    content: FileNode
-    source_info: Optional[SourceInfo] = None
+# Entries - the union of types which serve as "high-level" AST nodes,
+# i.e. those which can be the direct children of a `SourceFile`.
+Entry = Union[FlatStatement, SubcktDef, Library, LibSection, End]
 
 
 @datatype
-@dataclass
-class FileEntry:
-    content: FileNode
-    source_info: Optional[SourceInfo] = None
-
-
-@datatype
-@dataclass
-class SubcktEntry:
-    content: SubcktNode
-    source_info: Optional[SourceInfo] = None
-
-
-@datatype
-@dataclass
 class SourceFile:
     path: Path  # Source File Path
-    contents: List[FileEntry]  # Statements and their associated SourceInfo
+    contents: List[Entry]  # Statements and their associated SourceInfo
 
 
 @datatype
-@dataclass
 class Program:
+    """ 
+    # Multi-File "Netlist Program" 
+    The name of this type is a bit misleading, but borrowed from more typical compiler-parsers. 
+    Spice-culture generally lacks a term for "the totality of a simulator invocation input", 
+    or even "a pile of source-files to be used together". 
+    So, `Program` it is. 
+    """
+
     files: List[SourceFile]  # List of Source-File Contents
 
 
 @datatype
-@dataclass
 class Int:
+    """ Integer Number """
+
     val: int
 
 
 @datatype
-@dataclass
 class Float:
+    """ Floating Point Number """
+
     val: float
 
 
 @datatype
-@dataclass
 class MetricNum:
+    """ Number with Metric Suffix """
+
     val: str  # No conversion, just stored as string for now
 
 
 @datatype
-@dataclass
 class Call:
     """ 
     Function Call Node 
@@ -411,15 +418,17 @@ class Call:
 
 
 @datatype
-@dataclass
 class TypedArg:
-    tp: Ident
-    name: Ident
+    """ Typed Function Argument """
+
+    tp: Ident  # Argument Type
+    name: Ident  # Argument Name
 
 
 @datatype
-@dataclass
 class Return:
+    """ Function Return Node """
+
     val: "Expr"
 
 
@@ -429,47 +438,59 @@ FuncStatement = Union[Return]
 
 
 @datatype
-@dataclass
 class FunctionDef:
-    name: Ident
-    rtype: Ident
-    args: List[TypedArg]
-    stmts: List[FuncStatement]
+    """ Function Definition """
+
+    name: Ident  # Function Name
+    rtype: Ident  # Return Type
+    args: List[TypedArg]  # Argument List
+    stmts: List[FuncStatement]  # Function Body/ Statements
 
 
+# Expression Union
+# Everything which can be used as a mathematical expression,
+# and ultimately resolves to a scalar value at runtime.
 Expr = Union["UnOp", "BinOp", "TernOp", Int, Float, MetricNum, Ident, Call]
 
 
 @datatype
-@dataclass
 class UnOp:
     """ Unary Operation """
 
-    tp: str
-    targ: Expr
+    tp: str  # Operator Type. FIXME: enumerate these
+    targ: Expr  # Target Expression
 
 
 @datatype
-@dataclass
 class BinOp:
     """ Binary Operation """
 
-    tp: str
-    left: Expr
-    right: Expr
+    tp: str  # Operator Type. FIXME: enumerate these
+    left: Expr  # Left Operand Expression
+    right: Expr  # Right Operand Expression
 
 
 @datatype
-@dataclass
 class TernOp:
     """ Ternary Operation """
 
-    cond: Expr
-    if_true: Expr
-    if_false: Expr
+    cond: Expr  # Condition Expression
+    if_true: Expr  # Value if `cond` is True
+    if_false: Expr  # Value if `cond` is False
 
 
 # Update all the forward type-references
 for tp in datatypes:
     tp.__pydantic_model__.update_forward_refs()
+
+# And solely export the defined datatypes
+# (at least with star-imports, which are hard to avoid using with all these types)
+__all__ = [tp.__name__ for tp in datatypes] + [
+    "NetlistDialects",
+    "NetlistParseError",
+    "Expr",
+    "Entry",
+    "Statement",
+    "to_json",
+]
 
