@@ -450,11 +450,11 @@ class FunctionDef:
 # Expression Union
 # Everything which can be used as a mathematical expression,
 # and ultimately resolves to a scalar value at runtime.
-Expr = Union["UnOp", "BinOp", "TernOp", Int, Float, MetricNum, Ident, Call]
+Expr = Union["UnaryOp", "BinaryOp", "TernOp", Int, Float, MetricNum, Ident, Call]
 
 
 @datatype
-class UnOp:
+class UnaryOp:
     """ Unary Operation """
 
     tp: str  # Operator Type. FIXME: enumerate these
@@ -462,7 +462,7 @@ class UnOp:
 
 
 @datatype
-class BinOp:
+class BinaryOp:
     """ Binary Operation """
 
     tp: str  # Operator Type. FIXME: enumerate these

@@ -4,9 +4,12 @@
 """
 
 # Std-Lib Imports
+from ast import UnaryOp
 from typing import Optional, Union, IO, Dict, Iterable
 from enum import Enum
 from dataclasses import dataclass, field
+
+from numpy import isin
 
 # Local Imports
 from ..data import *
@@ -181,7 +184,52 @@ class Netlister:
 
     def write_source_file(self, file: SourceFile) -> None:
         """ Write the content of `file` to `self.dest`. """
-        raise NotImplementedError
+        self.write_comment(f"Source File: {file.path}")
+        for entry in file.contents:
+            self.write_entry(entry)
+
+    def write_entry(self, entry: Entry) -> None:
+        """ Dispatch across the various entry types. """
+
+        if isinstance(entry, SubcktDef):
+            return self.write_subckt_def(entry)
+        if isinstance(entry, Library):
+            return self.write_library(entry)
+        if isinstance(entry, LibSection):
+            return self.write_library_section(entry)
+        if isinstance(entry, End):
+            return self.write_end(entry)
+        if isinstance(entry, End):
+            return self.write_end(entry)
+        if isinstance(entry, Instance):
+            return self.write_subckt_instance(entry)
+        if isinstance(entry, Primitive):
+            return self.write_primitive_instance(entry)
+        if isinstance(entry, ParamDecls):
+            return self.write_param_decls(entry)
+        if isinstance(entry, ModelDef):
+            return self.write_model_def(entry)
+        if isinstance(entry, ModelVariant):
+            return self.write_model_variant(entry)
+        if isinstance(entry, ModelFamily):
+            return self.write_model_family(entry)
+        if isinstance(entry, ModelFamily):
+            return self.write_model_family(entry)
+        if isinstance(entry, Options):
+            return self.write_options(entry)
+        if isinstance(entry, Include):
+            return self.write_include(entry)
+        if isinstance(entry, UseLib):
+            return self.write_use_lib(entry)
+        if isinstance(entry, StatisticsBlock):
+            return self.write_statistics_block(entry)
+
+        # Explicitly note these data-types as unsupported for writing
+        unsupported = (DialectChange, FunctionDef, Unknown, AhdlInclude)
+        if isinstance(entry, unsupported):
+            raise ValueError(f"Unsupported Entry: {entry}")
+
+        raise TypeError(f"Invalid or Unsupported Entry: {entry}")
 
     def write(self, s: str) -> None:
         """ Helper/wrapper, passing to `self.dest` """
@@ -410,22 +458,77 @@ class Netlister:
         which *always* interpret the first line of an input-file as a comment (among many other dumb things). 
         So, always write one there right off the bat. """
 
-        if self.src.domain:
-            self.write_comment(f"circuit.Package {self.src.domain}")
-        else:
-            self.write_comment(f"Anonymous circuit.Package")
+        # FIXME!
+        # if self.src.domain:
+        #     self.write_comment(f"circuit.Package {self.src.domain}")
+        # else:
+        #     self.write_comment(f"Anonymous circuit.Package")
         self.write_comment(f"Written by {self.__class__.__name__}")
         self.write_comment("")
         self.writeln("")
 
+    def format_ident(self, ident: Ident) -> str:
+        """ Format an identifier. Default just returns its string `name`. """
+        return ident.name
+
+    def format_expr(self, expr: Expr) -> str:
+        """ Format a mathematical Expression. """
+
+        # Dispatch across the `Expr` type-union
+        if isinstance(expr, (Int, Float, MetricNum)):
+            # Scalar literals. Write their string value
+            return str(expr.val)
+        if isinstance(expr, Ident):
+            return self.format_ident(expr)  # Identifiers
+        if isinstance(expr, UnaryOp):
+            return self.format_unary_op(expr)  # Unary Operators
+        if isinstance(expr, BinaryOp):
+            return self.format_binary_op(expr)
+        if isinstance(expr, Call):
+            return self.format_function_call(expr)
+
+        # Carve out these explicitly unsupported (at least for now) cases:
+        if isinstance(expr, TernOp):
+            raise RuntimeError(f"Unsupported Expression Type {expr}")
+
+        raise TypeError(f"Invalid or Unsupported Expression {expr}")
+
+    def format_unary_op(self, op: UnaryOp) -> str:
+        """ Format a unary operation . """
+
+        operator = self.format_unary_operator(op.tp)
+        targ = self.format_expr(op.targ)
+
+        return f"{operator}{targ}"
+
+    def format_binary_op(self, op: BinaryOp) -> str:
+        """ Format a binary operation . """
+
+        left = self.format_expr(op.left)
+        operator = self.format_binary_operator(op.tp)
+        right = self.format_expr(op.right)
+
+        return f"{left}{operator}{right}"
+
+    def format_binary_operator(self, tp: str) -> str:
+        """ Format a binary operator """
+        # FIXME: `tp` will become an enum or similar, and need actual conversion
+        return tp
+
+    def format_unary_operator(self, tp: str) -> str:
+        """ Format a unary operator """
+        # FIXME: `tp` will become an enum or similar, and need actual conversion
+        return tp
+
+    def format_function_call(self, call: Call) -> str:
+        """ Format a function-call expression. """
+        funcname = self.format_ident(call.func)
+        args = [self.format_expr(arg) for arg in call.args]
+        return f'{funcname}({",".join(args)})'
+
     """ 
     Virtual `format` Methods 
     """
-
-    @classmethod
-    def format_param_decl(cls, name: str, param: vlsir.circuit.Parameter) -> str:
-        """ Format a named `Parameter` definition """
-        raise NotImplementedError
 
     @classmethod
     def format_port_decl(cls, pport: vlsir.circuit.Port) -> str:
@@ -465,18 +568,50 @@ class Netlister:
     Virtual `write` Methods 
     """
 
+    def write_model_def(self, model: ModelDef) -> None:
+        """ Write a model definition """
+        raise NotImplementedError
+    
+    def write_model_def(self, model: ModelDef) -> None:
+        """ Write a model definition """
+        raise NotImplementedError
+
+    def write_statistics_block(self, stats: StatisticsBlock) -> None:
+        """ Write a StatisticsBlock `stats` """
+        raise NotImplementedError
+
+    def write_param_decls(self, params: ParamDecls) -> None:
+        """ Write parameter declarations """
+        raise NotImplementedError
+
+    def write_param_decl(self, param: ParamDecl) -> None:
+        """ Write a parameter declaration """
+        raise NotImplementedError
+
+    def write_param_val(self, param: ParamVal) -> None:
+        """ Write a parameter value """
+        raise NotImplementedError
+
     def write_comment(self, comment: str) -> None:
         """ Format and string a string comment. 
         "Line comments" are the sole supported variety, which fit within a line, and extend to the end of that line. 
         The `write_comment` method assumes responsibility for closing the line. """
         raise NotImplementedError
 
-    def write_module_definition(self, pmodule: vlsir.circuit.Module) -> None:
-        """ Write Module `module` """
+    def write_subckt_def(self, subckt: SubcktDef) -> None:
+        """ Write Subckt Definition `subckt` """
         raise NotImplementedError
 
-    def write_instance(self, pinst: vlsir.circuit.Instance) -> str:
-        """ Write Instance `pinst` """
+    def write_instance(self, inst: Instance) -> None:
+        """ Write Instance `inst` """
+        raise NotImplementedError
+
+    def write_options(self, options: Options) -> None:
+        """ Write Options `options` """
+        raise NotImplementedError
+
+    def write_expr(self, expr: Expr) -> None:
+        """ Write a (potentially nested) mathematical expression `expr` """
         raise NotImplementedError
 
     """ 

@@ -328,7 +328,7 @@ class DialectParser:
         if self.match_any(Tokens.GT, Tokens.LT, Tokens.GE, Tokens.LE):
             tp = self.cur.tp
             right = self.parse_expr0b()
-            return BinOp(tp=tp, left=e, right=right)
+            return BinaryOp(tp=tp, left=e, right=right)
         return e
 
     def parse_expr0b(self) -> Expr:
@@ -337,7 +337,7 @@ class DialectParser:
         if self.match_any(Tokens.PLUS, Tokens.MINUS):
             tp = self.cur.tp
             right = self.parse_expr0b()
-            return BinOp(tp=tp, left=e, right=right)
+            return BinaryOp(tp=tp, left=e, right=right)
         return e
 
     def parse_expr1(self) -> Expr:
@@ -346,14 +346,14 @@ class DialectParser:
         if self.match_any(Tokens.STAR, Tokens.SLASH):
             tp = self.cur.tp
             right = self.parse_expr1()
-            return BinOp(tp=tp, left=e, right=right)
+            return BinaryOp(tp=tp, left=e, right=right)
         return e
 
     def parse_expr2(self) -> Expr:
         """ expr3 ( (**|^) expr2 )? """
         e = self.parse_expr2b()
         if self.match_any(Tokens.DUBSTAR, Tokens.CARET):
-            return BinOp(tp=self.cur.tp, left=e, right=self.parse_expr2())
+            return BinaryOp(tp=self.cur.tp, left=e, right=self.parse_expr2())
         return e
 
     def parse_expr2b(self) -> Expr:
@@ -384,7 +384,7 @@ class DialectParser:
         if self.match(Tokens.INT):
             return Int(int(self.cur.val))
         if self.match_any(Tokens.PLUS, Tokens.MINUS):
-            return UnOp(tp=self.cur.tp, targ=self.parse_term())
+            return UnaryOp(tp=self.cur.tp, targ=self.parse_term())
         if self.match(Tokens.IDENT):
             name = Ident(self.cur.val)
             if self.match(Tokens.LPAREN):  # Function-call syntax

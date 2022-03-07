@@ -19,29 +19,29 @@ from .spice import (
 )
 
 
-def writer(fmt) -> type:
+def writer(fmt: NetlistDialects = NetlistDialects.XYCE) -> type:
     """ Get the writer-class paired with the netlist-format. """
-    if fmt == NetlistFormat.XYCE:
+    if fmt == NetlistDialects.XYCE:
         return XyceNetlister
     raise ValueError
 
     # FIXME: anything and everything else!
-    
-    if fmt == NetlistFormat.SPECTRE:
+    if fmt == NetlistDialects.SPECTRE:
+
         return SpectreNetlister
-    if fmt == NetlistFormat.VERILOG:
+    if fmt == NetlistDialects.VERILOG:
         return VerilogNetlister
-    if fmt == NetlistFormat.SPICE:
+    if fmt == NetlistDialects.SPICE:
         return SpiceNetlister
-    if fmt == NetlistFormat.HSPICE:
+    if fmt == NetlistDialects.HSPICE:
         return HspiceNetlister
-    if fmt == NetlistFormat.NGSPICE:
+    if fmt == NetlistDialects.NGSPICE:
         return NgspiceNetlister
-    if fmt == NetlistFormat.CDL:
+    if fmt == NetlistDialects.CDL:
         return CdlNetlister
 
 
-def netlist(src: Program, dest: IO, fmt: NetlistFormatSpec = "spectre") -> None:
+def netlist(src: Program, dest: IO, fmt: NetlistFormatSpec = "xyce") -> None:
     """ Write netlist-`Program` `src` to destination `dest`. 
 
     Example usages: 
@@ -61,12 +61,12 @@ def netlist(src: Program, dest: IO, fmt: NetlistFormatSpec = "spectre") -> None:
     Destination `dest` may be anything that supports the `typing.IO` bundle, 
     commonly including open file-handles. `StringIO` is particularly helpful 
     for producing a netlist in an in-memory string.  
-    Format-specifier `fmt` may be any of the `NetlistFormatSpec` enumerated values 
+    Format-specifier `fmt` may be any of the `NetlistDialectsSpec` enumerated values 
     or their string equivalents.
     """
-    fmt_enum = NetlistFormat.get(fmt)
-    netlister_cls = fmt_enum.netlister()
-    netlister = netlister_cls(pkg, dest)
+    fmt_enum = NetlistDialects.get(fmt)
+    netlister_cls = writer(fmt_enum)
+    netlister = netlister_cls(src, dest)
     netlister.netlist()
 
 

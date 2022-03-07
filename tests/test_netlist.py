@@ -4,6 +4,7 @@
 """
 
 from textwrap import dedent
+from io import StringIO
 
 
 def test_version():
@@ -15,7 +16,7 @@ def test_version():
 def test_spice_exprs():
     from netlist import (
         SpiceDialectParser,
-        BinOp,
+        BinaryOp,
         Ident,
     )
 
@@ -29,7 +30,7 @@ def test_spice_exprs():
         return parser.parse(parser.parse_expr)
 
     p = parse_expression(" ' a + b ' ")  # SPICE-style ticked-expression
-    assert p == BinOp(tp="PLUS", left=Ident(name="a"), right=Ident(name="b"))
+    assert p == BinaryOp(tp="PLUS", left=Ident(name="a"), right=Ident(name="b"))
 
 
 def test_spectre_exprs():
@@ -38,8 +39,8 @@ def test_spectre_exprs():
         Int,
         Float,
         MetricNum,
-        UnOp,
-        BinOp,
+        UnaryOp,
+        BinaryOp,
         Ident,
         Call,
     )
@@ -55,23 +56,23 @@ def test_spectre_exprs():
     p = parse_expression("1")
     assert p == Int(1)
     p = parse_expression("1+2")
-    assert p == BinOp("PLUS", Int(1), Int(2))
+    assert p == BinaryOp("PLUS", Int(1), Int(2))
     p = parse_expression("1+2*3")
-    assert p == BinOp("PLUS", Int(1), BinOp("STAR", Int(2), Int(3)))
+    assert p == BinaryOp("PLUS", Int(1), BinaryOp("STAR", Int(2), Int(3)))
     p = parse_expression("1*2+3")
-    assert p == BinOp(tp="PLUS", left=BinOp("STAR", Int(1), Int(2)), right=Int(3))
+    assert p == BinaryOp(tp="PLUS", left=BinaryOp("STAR", Int(1), Int(2)), right=Int(3))
 
     p = parse_expression("(1+2)*(3+4)")
-    assert p == BinOp(
+    assert p == BinaryOp(
         tp="STAR",
-        left=BinOp(tp="PLUS", left=Int(val=1), right=Int(val=2)),
-        right=BinOp(tp="PLUS", left=Int(val=3), right=Int(val=4)),
+        left=BinaryOp(tp="PLUS", left=Int(val=1), right=Int(val=2)),
+        right=BinaryOp(tp="PLUS", left=Int(val=3), right=Int(val=4)),
     )
 
     p = parse_expression("a     ")
     assert p == Ident("a")
     p = parse_expression("   b + 1     ")
-    assert p == BinOp("PLUS", Ident("b"), Int(1))
+    assert p == BinaryOp("PLUS", Ident("b"), Int(1))
 
     p = parse_expression("1e-3")
     assert p == Float(1e-3)
@@ -82,69 +83,69 @@ def test_spectre_exprs():
     p = parse_expression(".1")
     assert p == Float(0.1)
     p = parse_expression("1e-3 + 2. * .3")
-    assert p == BinOp("PLUS", Float(1e-3), BinOp("STAR", Float(2.0), Float(0.3)))
+    assert p == BinaryOp("PLUS", Float(1e-3), BinaryOp("STAR", Float(2.0), Float(0.3)))
 
     p = parse_expression("r*l/w")
-    assert p == BinOp(
+    assert p == BinaryOp(
         tp="STAR",
         left=Ident(name="r"),
-        right=BinOp(tp="SLASH", left=Ident(name="l"), right=Ident(name="w")),
+        right=BinaryOp(tp="SLASH", left=Ident(name="l"), right=Ident(name="w")),
     )
 
     p = parse_expression("(0.5f * p)")  # SPICE metric-suffixed number
-    assert p == BinOp(tp="STAR", left=MetricNum(val="0.5f"), right=Ident(name="p"))
+    assert p == BinaryOp(tp="STAR", left=MetricNum(val="0.5f"), right=Ident(name="p"))
 
     p = parse_expression(" a + func(b, c) ")  # Function call
-    assert p == BinOp(
+    assert p == BinaryOp(
         tp="PLUS",
         left=Ident(name="a"),
         right=Call(func=Ident(name="func"), args=[Ident(name="b"), Ident(name="c")]),
     )
 
     p = parse_expression(" - a ")  # Unary operator
-    assert p == UnOp(tp="MINUS", targ=Ident(name="a"))
+    assert p == UnaryOp(tp="MINUS", targ=Ident(name="a"))
 
     p = parse_expression(" - + + - a ")  # Unary operator(s!)
-    assert p == UnOp(
+    assert p == UnaryOp(
         tp="MINUS",
-        targ=UnOp(
-            tp="PLUS", targ=UnOp(tp="PLUS", targ=UnOp(tp="MINUS", targ=Ident(name="a")))
+        targ=UnaryOp(
+            tp="PLUS", targ=UnaryOp(tp="PLUS", targ=UnaryOp(tp="MINUS", targ=Ident(name="a")))
         ),
     )
 
     p = parse_expression(" -5 * -3 ")  # Mixture of unary & binary ops
-    assert p == BinOp(
+    assert p == BinaryOp(
         tp="STAR",
-        left=UnOp(tp="MINUS", targ=Int(val=5)),
-        right=UnOp(tp="MINUS", targ=Int(val=3)),
+        left=UnaryOp(tp="MINUS", targ=Int(val=5)),
+        right=UnaryOp(tp="MINUS", targ=Int(val=3)),
     )
 
     p = parse_expression(" 3 ** 4 * 2  ")  # Mixture of unary & binary ops
-    assert p == BinOp(
+    assert p == BinaryOp(
         tp="STAR",
-        left=BinOp(tp="DUBSTAR", left=Int(val=3), right=Int(val=4)),
+        left=BinaryOp(tp="DUBSTAR", left=Int(val=3), right=Int(val=4)),
         right=Int(val=2),
     )
     p = parse_expression(" 2 * 3 ** 4 ")  # Mixture of unary & binary ops
-    assert p == BinOp(
+    assert p == BinaryOp(
         tp="STAR",
         left=Int(val=2),
-        right=BinOp(tp="DUBSTAR", left=Int(val=3), right=Int(val=4)),
+        right=BinaryOp(tp="DUBSTAR", left=Int(val=3), right=Int(val=4)),
     )
 
 
 def test_param_values():
-    from netlist import Ident, ParamDecl, Float, Expr, BinOp
+    from netlist import Ident, ParamDecl, Float, Expr, BinaryOp
 
     p = ParamDecl(Ident("a"), Float(5))
     p = ParamDecl(
-        Ident("b"), BinOp("PLUS", Float(1e-3), BinOp("STAR", Float(2.0), Float(0.3)))
+        Ident("b"), BinaryOp("PLUS", Float(1e-3), BinaryOp("STAR", Float(2.0), Float(0.3)))
     )
 
 
 def test_primitive():
     from netlist import SpiceDialectParser
-    from netlist.data import Ident, BinOp, Primitive, Float, Int, ParamVal
+    from netlist.data import Ident, BinaryOp, Primitive, Float, Int, ParamVal
 
     txt = dedent(
         """ r1 1 0
@@ -161,30 +162,30 @@ def test_primitive():
         kwargs=[
             ParamVal(
                 name=Ident(name="fun_param"),
-                val=BinOp(
+                val=BinaryOp(
                     tp="SLASH",
-                    left=BinOp(
+                    left=BinaryOp(
                         tp="PLUS",
-                        left=BinOp(
+                        left=BinaryOp(
                             tp="STAR",
                             left=Float(val=0.5),
-                            right=BinOp(
+                            right=BinaryOp(
                                 tp="MINUS",
                                 left=Ident(name="x"),
-                                right=BinOp(
+                                right=BinaryOp(
                                     tp="STAR", left=Int(val=2), right=Ident(name="y")
                                 ),
                             ),
                         ),
                         right=Ident(name="z"),
                     ),
-                    right=BinOp(
+                    right=BinaryOp(
                         tp="STAR",
                         left=Int(val=2),
-                        right=BinOp(
+                        right=BinaryOp(
                             tp="MINUS",
                             left=Ident(name="a"),
-                            right=BinOp(
+                            right=BinaryOp(
                                 tp="STAR", left=Int(val=2), right=Ident(name="b")
                             ),
                         ),
@@ -405,4 +406,51 @@ def test_spice_include():
     p = SpectreSpiceDialectParser.from_str(txt)
     i = p.parse(p.parse_statement)
     assert i == Include(path=Path("/path/to/file"))
+
+
+def test_write1():
+    """ Test writing an empty netlist `Program` """
+    from netlist import Program, SourceFile, netlist
+
+    src = Program(files=[SourceFile(path="/", contents=[])])
+    netlist(src=src, dest=StringIO())
+
+
+def test_write2():
+    """ Test writing some actual content  """
+    from netlist import (
+        Program,
+        SourceFile,
+        netlist,
+        Options,
+        ParamVal,
+        Ident,
+        MetricNum,
+        SourceInfo,
+        NetlistDialects,
+    )
+
+    src = Program(
+        files=[
+            SourceFile(
+                path="/",
+                contents=[
+                    Options(
+                        name=None,
+                        vals=[
+                            ParamVal(
+                                name=Ident(name="scale", source_info=None),
+                                val=MetricNum(val="1.0u", source_info=None),
+                                source_info=None,
+                            )
+                        ],
+                        source_info=SourceInfo(
+                            line=15, dialect=NetlistDialects.SPECTRE_SPICE
+                        ),
+                    )
+                ],
+            )
+        ]
+    )
+    netlist(src=src, dest=StringIO())
 
