@@ -205,6 +205,7 @@ class ModelVariant:
 
     model: Ident  # Model Family Name
     variant: Ident  # Variant Name
+    mtype: Ident  # Model Type
     args: List[Ident]  # Positional Arguments
     params: List[ParamDecl]  # Parameter Declarations & Defaults
 
@@ -453,19 +454,42 @@ class FunctionDef:
 Expr = Union["UnaryOp", "BinaryOp", "TernOp", Int, Float, MetricNum, Ident, Call]
 
 
+class UnaryOperator(Enum):
+    """ Enumerated, Supported Unary Operators 
+    Values generally equal their string-format equivalents. """
+
+    PLUS = "+"
+    NEG = "-"
+
+
 @datatype
 class UnaryOp:
     """ Unary Operation """
 
-    tp: str  # Operator Type. FIXME: enumerate these
+    tp: UnaryOperator  # Operator Type
     targ: Expr  # Target Expression
+
+
+class BinaryOperator(Enum):
+    """ Enumerated, Supported Binary Operators 
+    Values generally equal their string-format equivalents. """
+
+    ADD = "+"
+    SUB = "-"
+    MUL = "*"
+    DIV = "/"
+    POW = "^"  # Note there is some divergence between caret and double-star here.
+    GT = ">"
+    LT = "<"
+    GE = ">="
+    LE = "<="
 
 
 @datatype
 class BinaryOp:
     """ Binary Operation """
 
-    tp: str  # Operator Type. FIXME: enumerate these
+    tp: BinaryOperator  # Enumerated Operator Type
     left: Expr  # Left Operand Expression
     right: Expr  # Right Operand Expression
 
@@ -488,6 +512,8 @@ for tp in datatypes:
 __all__ = [tp.__name__ for tp in datatypes] + [
     "NetlistDialects",
     "NetlistParseError",
+    "BinaryOperator",
+    "UnaryOperator",
     "Expr",
     "Entry",
     "Statement",

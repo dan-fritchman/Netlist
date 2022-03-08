@@ -1,7 +1,7 @@
 """
 # Spice-Dialect Parsing 
 """
-from typing import Optional, Union 
+from typing import Optional, Union
 
 # Local Imports
 from ..data import *
@@ -77,8 +77,8 @@ class SpiceDialectParser(DialectParser):
                 self.fail()
             mname = Ident(spl[0])
             variant = Ident(str(spl[1]))
-            self.expect(Tokens.IDENT)  # FIXME: is this defined here or elsewhere?
-            mtype = Ident(self.cur.val)  # FIXME: Not stored, at least for now
+            self.expect(Tokens.IDENT)
+            mtype = Ident(self.cur.val)
 
             args = self.parse_ident_list(_endargs_startkwargs)
             # If we landed on a key-value param key, rewind it
@@ -86,7 +86,7 @@ class SpiceDialectParser(DialectParser):
                 self.rewind()
                 args.pop()
             params = self.parse_param_declarations()
-            return ModelVariant(mname, variant, args, params)
+            return ModelVariant(mname, variant, mtype, args, params)
 
         # Single ModelDef
         self.expect(Tokens.IDENT)

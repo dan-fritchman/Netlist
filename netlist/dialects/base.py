@@ -3,8 +3,8 @@
 """
 
 # Std-Lib Imports
-from enum import Enum 
-from typing import Iterable, Any, Optional, List, Union, Tuple 
+from enum import Enum
+from typing import Iterable, Any, Optional, List, Union, Tuple
 
 # Local Imports
 from ..data import *
@@ -122,7 +122,7 @@ class DialectParser:
         self.prev = None
 
     def peek(self) -> Optional[Token]:
-        """ Peek at the next two Tokens """
+        """ Peek at the next Token """
         return self.nxt
 
     def match(self, tp: str) -> bool:
@@ -132,12 +132,16 @@ class DialectParser:
             return True
         return False
 
-    def match_any(self, *tp: List[str]) -> bool:
-        """ Boolean indication of whether our next token matche *any* provided `tp` """
-        if self.nxt and any([self.nxt.tp == t for t in tp]):
-            self.advance()
-            return True
-        return False
+    def match_any(self, *tp: List[str]) -> Optional[Tokens]:
+        """ Boolean indication of whether our next token matche *any* provided `tp`. 
+        Returns the matching `Tokens` (type) if successful, or `None` otherwise. """
+        if not self.nxt:
+            return None
+        for t in tp:
+            if self.nxt.tp == t:
+                self.advance()
+                return t
+        return None
 
     def expect(self, *tp: List[str]) -> None:
         """ Assertion that our next token matches `tp`. 
@@ -326,7 +330,7 @@ class DialectParser:
         """ expr0b ( (<|>|<=|>=) expr0b )? """
         e = self.parse_expr0b()
         if self.match_any(Tokens.GT, Tokens.LT, Tokens.GE, Tokens.LE):
-            tp = self.cur.tp
+            tp = self.parse_binary_operator(self.cur.tp)
             right = self.parse_expr0b()
             return BinaryOp(tp=tp, left=e, right=right)
         return e
@@ -335,7 +339,7 @@ class DialectParser:
         """ expr1 ( (+|-) expr0 )? """
         e = self.parse_expr1()
         if self.match_any(Tokens.PLUS, Tokens.MINUS):
-            tp = self.cur.tp
+            tp = self.parse_binary_operator(self.cur.tp)
             right = self.parse_expr0b()
             return BinaryOp(tp=tp, left=e, right=right)
         return e
@@ -344,7 +348,7 @@ class DialectParser:
         """ expr2 ( (*|/) expr1 )? """
         e = self.parse_expr2()
         if self.match_any(Tokens.STAR, Tokens.SLASH):
-            tp = self.cur.tp
+            tp = self.parse_binary_operator(self.cur.tp)
             right = self.parse_expr1()
             return BinaryOp(tp=tp, left=e, right=right)
         return e
@@ -353,7 +357,8 @@ class DialectParser:
         """ expr3 ( (**|^) expr2 )? """
         e = self.parse_expr2b()
         if self.match_any(Tokens.DUBSTAR, Tokens.CARET):
-            return BinaryOp(tp=self.cur.tp, left=e, right=self.parse_expr2())
+            tp = self.parse_binary_operator(self.cur.tp)
+            return BinaryOp(tp=tp, left=e, right=self.parse_expr2())
         return e
 
     def parse_expr2b(self) -> Expr:
@@ -384,7 +389,8 @@ class DialectParser:
         if self.match(Tokens.INT):
             return Int(int(self.cur.val))
         if self.match_any(Tokens.PLUS, Tokens.MINUS):
-            return UnaryOp(tp=self.cur.tp, targ=self.parse_term())
+            tp = self.parse_unary_operator(self.cur.tp)
+            return UnaryOp(tp=tp, targ=self.parse_term())
         if self.match(Tokens.IDENT):
             name = Ident(self.cur.val)
             if self.match(Tokens.LPAREN):  # Function-call syntax
@@ -404,6 +410,36 @@ class DialectParser:
                 return Call(func=name, args=args)
             return name
         self.fail(f"Unexpected token while parsing expression-term: {self.cur}")
+
+    @staticmethod
+    def parse_unary_operator(tp: Tokens) -> UnaryOperator:
+        """ Parse `tp` to a unary operator """
+        the_map = {
+            Tokens.PLUS: UnaryOperator.PLUS,
+            Tokens.MINUS: UnaryOperator.NEG,
+        }
+        if tp in the_map:
+            return the_map[tp]
+        raise ValueError(f"Invalid Token {tp} when expecting binary operator")
+
+    @staticmethod
+    def parse_binary_operator(tp: Tokens) -> BinaryOperator:
+        """ Parse `tp` to a binary operator """
+        the_map = {
+            Tokens.PLUS: BinaryOperator.ADD,
+            Tokens.MINUS: BinaryOperator.SUB,
+            Tokens.STAR: BinaryOperator.MUL,
+            Tokens.SLASH: BinaryOperator.DIV,
+            Tokens.DUBSTAR: BinaryOperator.POW,
+            Tokens.CARET: BinaryOperator.POW,
+            Tokens.GT: BinaryOperator.GT,
+            Tokens.LT: BinaryOperator.LT,
+            Tokens.GE: BinaryOperator.GE,
+            Tokens.LE: BinaryOperator.LE,
+        }
+        if tp in the_map:
+            return the_map[tp]
+        raise ValueError(f"Invalid Token {tp} when expecting binary operator")
 
     def is_comment(self, tok: Token) -> bool:
         """ Boolean indication of whether `tok` begins a Comment """

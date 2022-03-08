@@ -254,8 +254,20 @@ class HierarchyCollector:
 
             if isinstance(stmt, EndSubckt):
                 break  # done with this module
-            elif isinstance(stmt, StartSubckt):
-                s = self.collect_subckt(start=e)
+
+            # Parameter statements in subckt scope are "promoted" to be subckt/module-parameters.
+            # We do so by appending them to any existing `start` parameters,
+            # and by *not* repeating the param-declarations in the resultant AST tree.
+            if isinstance(stmt, ParamDecl):
+                start.params.append(stmt)
+                continue
+            elif isinstance(stmt, ParamDecls):
+                start.params.extend(stmt.params)
+                continue
+
+            if isinstance(stmt, StartSubckt):
+                # Collect nested sub-circuit definitions
+                s = self.collect_subckt(start=stmt)
             else:  # Anything else, copy along
                 s = stmt
             nodes.append(s)

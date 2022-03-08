@@ -6,6 +6,8 @@
 from textwrap import dedent
 from io import StringIO
 
+from netlist.data import BinaryOperator, UnaryOperator
+
 
 def test_version():
     from netlist import __version__
@@ -30,7 +32,9 @@ def test_spice_exprs():
         return parser.parse(parser.parse_expr)
 
     p = parse_expression(" ' a + b ' ")  # SPICE-style ticked-expression
-    assert p == BinaryOp(tp="PLUS", left=Ident(name="a"), right=Ident(name="b"))
+    assert p == BinaryOp(
+        tp=BinaryOperator.ADD, left=Ident(name="a"), right=Ident(name="b")
+    )
 
 
 def test_spectre_exprs():
@@ -56,23 +60,29 @@ def test_spectre_exprs():
     p = parse_expression("1")
     assert p == Int(1)
     p = parse_expression("1+2")
-    assert p == BinaryOp("PLUS", Int(1), Int(2))
+    assert p == BinaryOp(BinaryOperator.ADD, Int(1), Int(2))
     p = parse_expression("1+2*3")
-    assert p == BinaryOp("PLUS", Int(1), BinaryOp("STAR", Int(2), Int(3)))
+    assert p == BinaryOp(
+        BinaryOperator.ADD, Int(1), BinaryOp(BinaryOperator.MUL, Int(2), Int(3))
+    )
     p = parse_expression("1*2+3")
-    assert p == BinaryOp(tp="PLUS", left=BinaryOp("STAR", Int(1), Int(2)), right=Int(3))
+    assert p == BinaryOp(
+        BinaryOperator.ADD,
+        left=BinaryOp(BinaryOperator.MUL, Int(1), Int(2)),
+        right=Int(3),
+    )
 
     p = parse_expression("(1+2)*(3+4)")
     assert p == BinaryOp(
-        tp="STAR",
-        left=BinaryOp(tp="PLUS", left=Int(val=1), right=Int(val=2)),
-        right=BinaryOp(tp="PLUS", left=Int(val=3), right=Int(val=4)),
+        tp=BinaryOperator.MUL,
+        left=BinaryOp(tp=BinaryOperator.ADD, left=Int(val=1), right=Int(val=2)),
+        right=BinaryOp(tp=BinaryOperator.ADD, left=Int(val=3), right=Int(val=4)),
     )
 
     p = parse_expression("a     ")
     assert p == Ident("a")
     p = parse_expression("   b + 1     ")
-    assert p == BinaryOp("PLUS", Ident("b"), Int(1))
+    assert p == BinaryOp(BinaryOperator.ADD, Ident("b"), Int(1))
 
     p = parse_expression("1e-3")
     assert p == Float(1e-3)
@@ -83,54 +93,66 @@ def test_spectre_exprs():
     p = parse_expression(".1")
     assert p == Float(0.1)
     p = parse_expression("1e-3 + 2. * .3")
-    assert p == BinaryOp("PLUS", Float(1e-3), BinaryOp("STAR", Float(2.0), Float(0.3)))
+    assert p == BinaryOp(
+        BinaryOperator.ADD,
+        Float(1e-3),
+        BinaryOp(BinaryOperator.MUL, Float(2.0), Float(0.3)),
+    )
 
     p = parse_expression("r*l/w")
     assert p == BinaryOp(
-        tp="STAR",
+        tp=BinaryOperator.MUL,
         left=Ident(name="r"),
-        right=BinaryOp(tp="SLASH", left=Ident(name="l"), right=Ident(name="w")),
+        right=BinaryOp(
+            tp=BinaryOperator.DIV, left=Ident(name="l"), right=Ident(name="w")
+        ),
     )
 
     p = parse_expression("(0.5f * p)")  # SPICE metric-suffixed number
-    assert p == BinaryOp(tp="STAR", left=MetricNum(val="0.5f"), right=Ident(name="p"))
+    assert p == BinaryOp(
+        tp=BinaryOperator.MUL, left=MetricNum(val="0.5f"), right=Ident(name="p")
+    )
 
     p = parse_expression(" a + func(b, c) ")  # Function call
     assert p == BinaryOp(
-        tp="PLUS",
+        tp=BinaryOperator.ADD,
         left=Ident(name="a"),
         right=Call(func=Ident(name="func"), args=[Ident(name="b"), Ident(name="c")]),
     )
 
     p = parse_expression(" - a ")  # Unary operator
-    assert p == UnaryOp(tp="MINUS", targ=Ident(name="a"))
+    assert p == UnaryOp(tp=UnaryOperator.NEG, targ=Ident(name="a"))
 
     p = parse_expression(" - + + - a ")  # Unary operator(s!)
     assert p == UnaryOp(
-        tp="MINUS",
+        tp=UnaryOperator.NEG,
         targ=UnaryOp(
-            tp="PLUS", targ=UnaryOp(tp="PLUS", targ=UnaryOp(tp="MINUS", targ=Ident(name="a")))
+            tp=UnaryOperator.PLUS,
+            targ=UnaryOp(
+                tp=UnaryOperator.PLUS,
+                targ=UnaryOp(tp=UnaryOperator.NEG, targ=Ident(name="a")),
+            ),
         ),
     )
 
     p = parse_expression(" -5 * -3 ")  # Mixture of unary & binary ops
     assert p == BinaryOp(
-        tp="STAR",
-        left=UnaryOp(tp="MINUS", targ=Int(val=5)),
-        right=UnaryOp(tp="MINUS", targ=Int(val=3)),
+        tp=BinaryOperator.MUL,
+        left=UnaryOp(tp=UnaryOperator.NEG, targ=Int(val=5)),
+        right=UnaryOp(tp=UnaryOperator.NEG, targ=Int(val=3)),
     )
 
     p = parse_expression(" 3 ** 4 * 2  ")  # Mixture of unary & binary ops
     assert p == BinaryOp(
-        tp="STAR",
-        left=BinaryOp(tp="DUBSTAR", left=Int(val=3), right=Int(val=4)),
+        tp=BinaryOperator.MUL,
+        left=BinaryOp(tp=BinaryOperator.POW, left=Int(val=3), right=Int(val=4)),
         right=Int(val=2),
     )
     p = parse_expression(" 2 * 3 ** 4 ")  # Mixture of unary & binary ops
     assert p == BinaryOp(
-        tp="STAR",
+        tp=BinaryOperator.MUL,
         left=Int(val=2),
-        right=BinaryOp(tp="DUBSTAR", left=Int(val=3), right=Int(val=4)),
+        right=BinaryOp(tp=BinaryOperator.POW, left=Int(val=3), right=Int(val=4)),
     )
 
 
@@ -139,7 +161,12 @@ def test_param_values():
 
     p = ParamDecl(Ident("a"), Float(5))
     p = ParamDecl(
-        Ident("b"), BinaryOp("PLUS", Float(1e-3), BinaryOp("STAR", Float(2.0), Float(0.3)))
+        Ident("b"),
+        BinaryOp(
+            BinaryOperator.ADD,
+            Float(1e-3),
+            BinaryOp(BinaryOperator.MUL, Float(2.0), Float(0.3)),
+        ),
     )
 
 
@@ -163,30 +190,34 @@ def test_primitive():
             ParamVal(
                 name=Ident(name="fun_param"),
                 val=BinaryOp(
-                    tp="SLASH",
+                    tp=BinaryOperator.DIV,
                     left=BinaryOp(
-                        tp="PLUS",
+                        tp=BinaryOperator.ADD,
                         left=BinaryOp(
-                            tp="STAR",
+                            tp=BinaryOperator.MUL,
                             left=Float(val=0.5),
                             right=BinaryOp(
-                                tp="MINUS",
+                                tp=BinaryOperator.SUB,
                                 left=Ident(name="x"),
                                 right=BinaryOp(
-                                    tp="STAR", left=Int(val=2), right=Ident(name="y")
+                                    tp=BinaryOperator.MUL,
+                                    left=Int(val=2),
+                                    right=Ident(name="y"),
                                 ),
                             ),
                         ),
                         right=Ident(name="z"),
                     ),
                     right=BinaryOp(
-                        tp="STAR",
+                        tp=BinaryOperator.MUL,
                         left=Int(val=2),
                         right=BinaryOp(
-                            tp="MINUS",
+                            tp=BinaryOperator.SUB,
                             left=Ident(name="a"),
                             right=BinaryOp(
-                                tp="STAR", left=Int(val=2), right=Ident(name="b")
+                                tp=BinaryOperator.MUL,
+                                left=Int(val=2),
+                                right=Ident(name="b"),
                             ),
                         ),
                     ),
@@ -308,6 +339,7 @@ def test_model_family():
             ModelVariant(
                 model=Ident(name="npd_model"),
                 variant=Ident(name="0"),
+                mtype=Ident(name="bsim3"),
                 args=[],
                 params=[
                     ParamDecl(
@@ -336,6 +368,7 @@ def test_model_family():
             ModelVariant(
                 model=Ident(name="npd_model"),
                 variant=Ident(name="1"),
+                mtype=Ident(name="bsim3"),
                 args=[],
                 params=[
                     ParamDecl(

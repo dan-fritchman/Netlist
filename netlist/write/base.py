@@ -6,10 +6,9 @@
 # Std-Lib Imports
 from ast import UnaryOp
 from typing import Optional, Union, IO, Dict, Iterable
-from enum import Enum
+from enum import Enum, auto
 from dataclasses import dataclass, field
 
-from numpy import isin
 
 # Local Imports
 from ..data import *
@@ -18,6 +17,14 @@ import vlsir
 
 # Internal type shorthand
 ModuleLike = Union[vlsir.circuit.Module, vlsir.circuit.ExternalModule]
+
+
+class ExpressionState(Enum):
+    """ Enumerated Expression States 
+    Indicates within the writer whether it is amid an arithmetic expression. """
+
+    PROGRAM = auto()
+    EXPR = auto()
 
 
 class SpicePrefix(Enum):
@@ -158,6 +165,7 @@ class Netlister:
     def __init__(self, src: Program, dest: IO):
         self.src = src
         self.dest = dest
+        self.expr_state = ExpressionState.PROGRAM
         self.indent = Indent(chars="  ")
         self.module_names = set()  # Netlisted Module names
         self.pmodules = dict()  # Visited proto-Modules
@@ -211,8 +219,6 @@ class Netlister:
             return self.write_model_def(entry)
         if isinstance(entry, ModelVariant):
             return self.write_model_variant(entry)
-        if isinstance(entry, ModelFamily):
-            return self.write_model_family(entry)
         if isinstance(entry, ModelFamily):
             return self.write_model_family(entry)
         if isinstance(entry, Options):
@@ -472,26 +478,43 @@ class Netlister:
         return ident.name
 
     def format_expr(self, expr: Expr) -> str:
-        """ Format a mathematical Expression. """
+        """ Format a mathematical Expression. 
+        Primarily dispatches across the `Expr` type-union. """
 
-        # Dispatch across the `Expr` type-union
+        # Scalar literals. Return their string value.
         if isinstance(expr, (Int, Float, MetricNum)):
-            # Scalar literals. Write their string value
             return str(expr.val)
-        if isinstance(expr, Ident):
+        elif isinstance(expr, Ident):
             return self.format_ident(expr)  # Identifiers
+
+        # Everything else is some form of compound expression, e.g. a function call, add or ternary op.
+        # If we are not already in a sub-expression, write the evaluator character.
+        if self.expr_state != ExpressionState.EXPR:
+            self.expr_state = ExpressionState.EXPR
+            rv = "{"  # FIXME: make dialect-specific expr-opener
+            close_me_please = True
+        else:
+            rv = ""
+            close_me_please = False
+
         if isinstance(expr, UnaryOp):
-            return self.format_unary_op(expr)  # Unary Operators
-        if isinstance(expr, BinaryOp):
-            return self.format_binary_op(expr)
-        if isinstance(expr, Call):
-            return self.format_function_call(expr)
+            rv += self.format_unary_op(expr)  # Unary Operators
+        elif isinstance(expr, BinaryOp):
+            rv += self.format_binary_op(expr)
+        elif isinstance(expr, Call):
+            rv += self.format_function_call(expr)
 
         # Carve out these explicitly unsupported (at least for now) cases:
-        if isinstance(expr, TernOp):
+        elif isinstance(expr, TernOp):
             raise RuntimeError(f"Unsupported Expression Type {expr}")
+        else:
+            raise TypeError(f"Invalid or Unsupported Expression {expr}")
 
-        raise TypeError(f"Invalid or Unsupported Expression {expr}")
+        if close_me_please:
+            self.expr_state = ExpressionState.PROGRAM
+            rv += "}"  # FIXME: make dialect-specific expr-closer
+
+        return rv
 
     def format_unary_op(self, op: UnaryOp) -> str:
         """ Format a unary operation . """
@@ -510,15 +533,13 @@ class Netlister:
 
         return f"{left}{operator}{right}"
 
-    def format_binary_operator(self, tp: str) -> str:
+    def format_binary_operator(self, tp: BinaryOperator) -> str:
         """ Format a binary operator """
-        # FIXME: `tp` will become an enum or similar, and need actual conversion
-        return tp
+        return tp.value
 
-    def format_unary_operator(self, tp: str) -> str:
+    def format_unary_operator(self, tp: UnaryOperator) -> str:
         """ Format a unary operator """
-        # FIXME: `tp` will become an enum or similar, and need actual conversion
-        return tp
+        return tp.value
 
     def format_function_call(self, call: Call) -> str:
         """ Format a function-call expression. """
@@ -571,7 +592,7 @@ class Netlister:
     def write_model_def(self, model: ModelDef) -> None:
         """ Write a model definition """
         raise NotImplementedError
-    
+
     def write_model_def(self, model: ModelDef) -> None:
         """ Write a model definition """
         raise NotImplementedError

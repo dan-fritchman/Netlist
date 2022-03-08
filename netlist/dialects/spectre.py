@@ -2,7 +2,7 @@
 # Spectre-Dialect Parsing 
 """
 
-from typing import Optional, Union, List 
+from typing import Optional, Union, List
 
 # Local Imports
 from ..data import *
@@ -124,7 +124,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
                 vname = Ident(str(self.cur.val))
                 self.expect(Tokens.COLON)
                 params = self.parse_param_declarations()
-                vars.append(ModelVariant(mname, vname, [], params))
+                vars.append(ModelVariant(mname, vname, mtype, [], params))
             self.expect(Tokens.NEWLINE)
             return ModelFamily(mname, mtype, vars)
         # Single ModelDef
@@ -145,7 +145,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         args = [ParamDecl(a, None) for a in args]
         # Parse the remaining default-valued params
         vals = self.parse_param_declarations()  # NEWLINE is captured inside
-        return ParamDecls(vals)
+        return ParamDecls(args + vals)
 
     def parse_variations(self) -> List[Variation]:
         """ Parse a list of variation-statements, of the form

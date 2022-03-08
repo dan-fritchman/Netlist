@@ -33,6 +33,7 @@ heavily re-using a central `SpiceNetlister` class, but requiring simulator-speci
 """
 
 # Std-Lib Imports
+import sys
 from warnings import warn
 from typing import Dict, Union, List
 
@@ -119,34 +120,11 @@ class SpiceNetlister(Netlister):
             self.write_param_decl(name, pparam)
         self.write("\n")
 
-    # def write_instance_name(
-    #     self, pinst: Instance, rmodule: ResolvedModule
-    # ) -> None:
-    #     """ Write the instance-name line for `pinst`, including the SPICE-dictated primitive-prefix. """
-    #     self.write(f"{rmodule.spice_prefix.value}{pinst.name} \n")
-
-    # def write_instance(self, pinst: Instance) -> None:
-    #     """ Create and return a netlist-string for Instance `pinst`"""
-
-    #     # Get its Module or ExternalModule definition,
-    #     resolved = self.resolve_reference(pinst.module)
-
-    #     # And dispatch to `subckt` or `primitive` writers
-    #     if resolved.spice_prefix == SpicePrefix.SUBCKT:
-    #         return self.write_subckt_instance(pinst, resolved)
-
-    #     if resolved.spice_prefix == SpicePrefix.VSOURCE:
-    #         # Voltage sources get weird, and vary between dialiects. Farm them out to a dedicated method.
-    #         return self.write_voltage_source_instance(pinst, resolved)
-
-    #     # Everything else falls into the `primitive` category
-    #     return self.write_primitive_instance(pinst, resolved)
-
     def write_subckt_instance(self, pinst: Instance) -> None:
         """ Write sub-circuit-instance `pinst` of `rmodule`. """
 
         # Write the instance name
-        self.write(self.format_ident(pinst.name) + " ")
+        self.write(self.format_ident(pinst.name) + " \n")
 
         # Write its port-connections
         self.write_instance_conns(pinst)
@@ -155,7 +133,6 @@ class SpiceNetlister(Netlister):
         self.write("+ " + self.format_ident(pinst.module) + " \n")
 
         # Write its parameter values
-        # resolved_param_values = self.get_instance_params(pinst, rmodule.module)
         self.write_instance_params(pinst.params)
 
         # Add a blank after each instance
@@ -167,57 +144,20 @@ class SpiceNetlister(Netlister):
         in that they can have positional (only) parameters. """
 
         # Write the instance name
-        self.write(self.format_ident(pinst.name) + " ")
+        self.write(self.format_ident(pinst.name) + " \n")
 
+        self.write("+ ")
         for arg in pinst.args:
             self.write(self.format_expr(arg) + " ")
+        self.write(" \n")
 
+        self.write("+ ")
         for kwarg in pinst.kwargs:
             self.write_param_val(kwarg)
             self.write(" ")
 
         # Add a blank after each instance
         self.write("\n")
-
-    # def write_voltage_source_instance(
-    #     self, pinst: Instance, rmodule: ResolvedModule,
-    # ) -> None:
-    #     """ Write a voltage-source instance `pinst`.
-    #     Throws an Exception if `rmodule` is not a known voltage-source type. """
-
-    #     # Resolve its parameter values
-    #     resolved_param_values = self.get_instance_params(pinst, rmodule.module)
-
-    #     # Write the instance name
-    #     self.write_instance_name(pinst, rmodule)
-
-    #     # Write its port-connections
-    #     self.write_instance_conns(pinst, rmodule.module)
-
-    #     # Handle each of the voltage-source cases
-    #     name = rmodule.module.name.name
-    #     if name == "vdc":
-    #         dc = resolved_param_values.pop("dc")
-    #         self.write(f"+ dc {dc} \n")
-
-    #     elif name == "vpulse":
-    #         keys = ["v1", "v2", "td", "tr", "tf", "tpw", "tper"]
-    #         pp = resolved_param_values.pop_many(keys)
-    #         self.write(f"+ pulse (" + " ".join([pp[k] for k in keys]) + ") \n")
-
-    #     elif name == "vsin":
-    #         keys = ["voff", "vamp", "freq", "td", "phase"]
-    #         pp = resolved_param_values.pop_many(keys)
-    #         self.write(f"+ sin (" + " ".join([pp[k] for k in keys]) + ") \n")
-
-    #     else:
-    #         raise ValueError(f"Invalid or unsupported voltage-source type: {name}")
-
-    #     # Now! Write its subckt-style by-name parameter values
-    #     self.write_instance_params(resolved_param_values)
-
-    #     # Add a blank after each instance
-    #     self.write("\n")
 
     def write_instance_conns(self, pinst: Instance) -> None:
         """ Write the port-connections for Instance `pinst` """
@@ -252,7 +192,7 @@ class SpiceNetlister(Netlister):
         self.write("+ ")
 
         if not pvals:  # Write a quick comment for no parameters
-            self.write_comment("No parameters")
+            return self.write_comment("No parameters")
 
         # And write them
         for pval in pvals:
@@ -315,11 +255,15 @@ class SpiceNetlister(Netlister):
             self.write_comment(msg)
             self.write("\n+ ")
 
-        if param.default is not None:
-            default = self.format_expr(param.default)
-            self.write(f"{self.format_ident(param.name)}={default}")
+        if param.default is None:
+            msg = f"Required (non-default) parameter {param.name} is not supported by {self.__class__.__name__}. "
+            msg += "Setting to maximum floating-point value {sys.float_info.max}, which almost certainly will not work if instantiated."
+            warn(msg)
+            default = str(sys.float_info.max)
         else:
-            self.write(self.format_ident(param.name))
+            default = self.format_expr(param.default)
+
+        self.write(f"{self.format_ident(param.name)}={default}")
 
     def write_param_val(self, param: ParamVal) -> None:
         """ Write a parameter value """
@@ -383,13 +327,22 @@ class SpiceNetlister(Netlister):
             self.write("+ ")
             self.write_param_decl(p)
             self.write("\n")
+        self.write("\n")
+
+    def write_model_family(self, mfam: ModelFamily) -> None:
+        """ Write a model family """
+        # Just requires writing each variant.
+        # They will be output with `modelname.variant` names, as most SPICE formats want.
+        for variant in mfam.variants:
+            self.write_model_variant(variant)
 
     def write_model_variant(self, mvar: ModelVariant) -> None:
         """ Write a model variant """
 
         # This just convertes to a `ModelDef` with a dot-separated name, and running `write_model_def`.
         model = ModelDef(
-            name=Ident(f"{mvar.model}.{mvar.variant}"),
+            name=Ident(f"{mvar.model.name}.{mvar.variant.name}"),
+            mtype=mvar.mtype,
             args=mvar.args,
             params=mvar.params,
         )
@@ -449,6 +402,7 @@ class XyceNetlister(SpiceNetlister):
         self.write("+ PARAMS: ")  # <= Xyce-specific
         for param in params:
             self.write_param_decl(param)
+            self.write(" ")
         self.write("\n")
 
     def write_instance_params(self, pvals: List[ParamVal]) -> None:
@@ -464,7 +418,7 @@ class XyceNetlister(SpiceNetlister):
         self.write("+ ")
 
         if not pvals:  # Write a quick comment for no parameters
-            self.write_comment("No parameters")
+            return self.write_comment("No parameters")
 
         self.write("PARAMS: ")  # <= Xyce-specific
         # And write them
