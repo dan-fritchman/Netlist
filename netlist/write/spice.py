@@ -34,15 +34,15 @@ heavily re-using a central `SpiceNetlister` class, but requiring simulator-speci
 
 # Std-Lib Imports
 import sys
+from enum import Enum 
 from warnings import warn
 from typing import Dict, Union, List
 
 # Local Imports
 from ..data import *
-import vlsir
 
 # Import the base-class
-from .base import Netlister, ResolvedModule, ResolvedParams, SpicePrefix, ModuleLike
+from .base import Netlister
 
 
 class SpiceNetlister(Netlister):
@@ -201,43 +201,43 @@ class SpiceNetlister(Netlister):
 
         self.write("\n")
 
-    def format_concat(self, pconc: vlsir.circuit.Concat) -> str:
-        """ Format the Concatenation of several other Connections """
-        out = ""
-        for part in pconc.parts:
-            out += self.format_connection(part) + " "
-        return out
+    # def format_concat(self, pconc: vlsir.circuit.Concat) -> str:
+    #     """ Format the Concatenation of several other Connections """
+    #     out = ""
+    #     for part in pconc.parts:
+    #         out += self.format_connection(part) + " "
+    #     return out
 
-    @classmethod
-    def format_port_decl(cls, pport: vlsir.circuit.Port) -> str:
-        """ Get a netlist `Port` definition """
-        return cls.format_signal_ref(pport.signal)
+    # @classmethod
+    # def format_port_decl(cls, pport: vlsir.circuit.Port) -> str:
+    #     """ Get a netlist `Port` definition """
+    #     return cls.format_signal_ref(pport.signal)
 
-    @classmethod
-    def format_port_ref(cls, pport: vlsir.circuit.Port) -> str:
-        """ Get a netlist `Port` reference """
-        return cls.format_signal_ref(pport.signal)
+    # @classmethod
+    # def format_port_ref(cls, pport: vlsir.circuit.Port) -> str:
+    #     """ Get a netlist `Port` reference """
+    #     return cls.format_signal_ref(pport.signal)
 
-    @classmethod
-    def format_signal_ref(cls, psig: vlsir.circuit.Signal) -> str:
-        """ Get a netlist definition for Signal `psig` """
-        if psig.width < 1:
-            raise RuntimeError
-        if psig.width == 1:  # width==1, i.e. a scalar signal
-            return psig.name
-        # Vector/ multi "bit" Signal. Creates several spice signals.
-        return " ".join(
-            [f"{psig.name}{cls.format_bus_bit(k)}" for k in reversed(range(psig.width))]
-        )
+    # @classmethod
+    # def format_signal_ref(cls, psig: vlsir.circuit.Signal) -> str:
+    #     """ Get a netlist definition for Signal `psig` """
+    #     if psig.width < 1:
+    #         raise RuntimeError
+    #     if psig.width == 1:  # width==1, i.e. a scalar signal
+    #         return psig.name
+    #     # Vector/ multi "bit" Signal. Creates several spice signals.
+    #     return " ".join(
+    #         [f"{psig.name}{cls.format_bus_bit(k)}" for k in reversed(range(psig.width))]
+    #     )
 
-    @classmethod
-    def format_signal_slice(cls, pslice: vlsir.circuit.Slice) -> str:
-        """ Get a netlist definition for Signal-Slice `pslice` """
-        base = pslice.signal
-        indices = list(reversed(range(pslice.bot, pslice.top + 1)))
-        if not len(indices):
-            raise RuntimeError(f"Attempting to netlist empty slice {pslice}")
-        return " ".join([f"{base}{cls.format_bus_bit(k)}" for k in indices])
+    # @classmethod
+    # def format_signal_slice(cls, pslice: vlsir.circuit.Slice) -> str:
+    #     """ Get a netlist definition for Signal-Slice `pslice` """
+    #     base = pslice.signal
+    #     indices = list(reversed(range(pslice.bot, pslice.top + 1)))
+    #     if not len(indices):
+    #         raise RuntimeError(f"Attempting to netlist empty slice {pslice}")
+    #     return " ".join([f"{base}{cls.format_bus_bit(k)}" for k in indices])
 
     @classmethod
     def format_bus_bit(cls, index: Union[int, str]) -> str:
@@ -367,6 +367,13 @@ class SpiceNetlister(Netlister):
 
         self.write("\n")  # Ending blank-line
 
+    def write_library_section(self, section: LibSection) -> None:
+        """ Write a Library Section definition """
+        self.write(f".lib {self.format_ident(section.name)}\n")
+        for entry in section.entries:
+            self.write_entry(entry)
+        self.write(f".endl {self.format_ident(section.name)}\n")
+
 
 class HspiceNetlister(SpiceNetlister):
     """
@@ -438,6 +445,57 @@ class XyceNetlister(SpiceNetlister):
     def format_expression(self, expr: str) -> str:
         # Xyce expressions are wrapped in curly braces.
         return f"{{{expr}}}"
+
+    def write_options(self, options: Options) -> None:
+        """ Write Options `options` 
+        
+        Xyce differs from many Spice-class simulators 
+        in categorizing options, and requiring that users known their category. 
+        Example categories include settings for the netlist parser, 
+        device models, and many, many solver configurations. 
+
+        The `netlist` AST also does not include this information, 
+        so valid options per-category are defined here. 
+        """
+
+        if options.name is not None:
+            msg = f"Warning invalid `name`d Options"
+            warn(msg)
+            self.write_comment(msg)
+            self.write("\n")
+
+        class Category(Enum):
+            """ Xyce-specific categories """
+
+            DEVICE = "device"
+            PARSER = "parser"
+
+        # Mapping from option-names to categories
+        categories = {
+            "scale": Category.PARSER,
+            # FIXME: everything else
+        }
+
+        # Group the options by category
+        by_category = {}
+        for option in options.vals:
+            name = self.format_ident(option.name)
+            if name not in categories:
+                msg = f"Unknown Xyce option `{name}`, cannot find `.options` category"
+                raise RuntimeError(msg)
+            category = categories[name].value
+            if category not in by_category:
+                by_category[category] = []
+            by_category[category].append(option)
+
+        for (category_name, category_list) in by_category.items():
+            # Get to the actual option-writing
+            self.write(f".options {category_name} \n")
+            for option in category_list:
+                self.write("+ ")
+                self.write_param_val(option)
+                self.write(" \n")
+            self.write("\n")
 
 
 class NgspiceNetlister(SpiceNetlister):

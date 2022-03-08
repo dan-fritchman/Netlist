@@ -12,11 +12,6 @@ from dataclasses import dataclass, field
 
 # Local Imports
 from ..data import *
-import vlsir
-
-
-# Internal type shorthand
-ModuleLike = Union[vlsir.circuit.Module, vlsir.circuit.ExternalModule]
 
 
 class ExpressionState(Enum):
@@ -52,14 +47,14 @@ class SpicePrefix(Enum):
     TLINE = "o"
 
 
-@dataclass
-class ResolvedModule:
-    """ Resolved reference to a `Module` or `ExternalModule`. 
-    Includes its spice-language prefix, and if user-defined its netlist-sanitized module-name. """
+# @dataclass
+# class ResolvedModule:
+#     """ Resolved reference to a `Module` or `ExternalModule`.
+#     Includes its spice-language prefix, and if user-defined its netlist-sanitized module-name. """
 
-    module: ModuleLike
-    module_name: str
-    spice_prefix: SpicePrefix
+#     module: ModuleLike
+#     module_name: str
+#     spice_prefix: SpicePrefix
 
 
 @dataclass
@@ -201,8 +196,6 @@ class Netlister:
 
         if isinstance(entry, SubcktDef):
             return self.write_subckt_def(entry)
-        if isinstance(entry, Library):
-            return self.write_library(entry)
         if isinstance(entry, LibSection):
             return self.write_library_section(entry)
         if isinstance(entry, End):
@@ -231,7 +224,8 @@ class Netlister:
             return self.write_statistics_block(entry)
 
         # Explicitly note these data-types as unsupported for writing
-        unsupported = (DialectChange, FunctionDef, Unknown, AhdlInclude)
+        unsupported = (DialectChange, FunctionDef, Unknown, AhdlInclude, Library)
+        # FIXME: is writing `Library` even really a thing?
         if isinstance(entry, unsupported):
             raise ValueError(f"Unsupported Entry: {entry}")
 
@@ -245,218 +239,218 @@ class Netlister:
         """ Write `s` as a line, at our current `indent` level. """
         self.write(f"{self.indent.state}{s}\n")
 
-    def get_external_module(self, emod: vlsir.circuit.ExternalModule) -> None:
-        """ Visit an ExternalModule definition.
-        "Netlisting" these doesn't actually write anything,
-        but just stores a reference  in internal dictionary `ext_modules`
-        for future references to them. """
-        key = (emod.name.domain, emod.name.name)
-        if key in self.ext_modules:
-            raise RuntimeError(f"Invalid doubly-defined external module {emod}")
-        self.ext_modules[key] = emod
+    # def get_external_module(self, emod: vlsir.circuit.ExternalModule) -> None:
+    #     """ Visit an ExternalModule definition.
+    #     "Netlisting" these doesn't actually write anything,
+    #     but just stores a reference  in internal dictionary `ext_modules`
+    #     for future references to them. """
+    #     key = (emod.name.domain, emod.name.name)
+    #     if key in self.ext_modules:
+    #         raise RuntimeError(f"Invalid doubly-defined external module {emod}")
+    #     self.ext_modules[key] = emod
 
-    @classmethod
-    def get_param_default(cls, pparam: vlsir.circuit.Parameter) -> Optional[str]:
-        """ Get the default value of `pparam`. Returns `None` for no default. """
-        if pparam.default.WhichOneof("value") is None:
-            return None
-        return cls.get_param_value(pparam.default)
+    # @classmethod
+    # def get_param_default(cls, pparam: vlsir.circuit.Parameter) -> Optional[str]:
+    #     """ Get the default value of `pparam`. Returns `None` for no default. """
+    #     if pparam.default.WhichOneof("value") is None:
+    #         return None
+    #     return cls.get_param_value(pparam.default)
 
-    @classmethod
-    def get_param_value(cls, ppval: vlsir.circuit.ParameterValue) -> str:
-        """ Get a string representation of a parameter-value """
-        ptype = ppval.WhichOneof("value")
-        if ptype == "integer":
-            return str(int(ppval.integer))
-        if ptype == "double":
-            return str(float(ppval.double))
-        if ptype == "string":
-            return str(ppval.string)
-        if ptype == "literal":
-            return str(ppval.literal)
-        raise ValueError
+    # @classmethod
+    # def get_param_value(cls, ppval: vlsir.circuit.ParameterValue) -> str:
+    #     """ Get a string representation of a parameter-value """
+    #     ptype = ppval.WhichOneof("value")
+    #     if ptype == "integer":
+    #         return str(int(ppval.integer))
+    #     if ptype == "double":
+    #         return str(float(ppval.double))
+    #     if ptype == "string":
+    #         return str(ppval.string)
+    #     if ptype == "literal":
+    #         return str(ppval.literal)
+    #     raise ValueError
 
-    @classmethod
-    def get_instance_params(
-        cls, pinst: vlsir.circuit.Instance, pmodule: ModuleLike
-    ) -> ResolvedParams:
-        """ Resolve the parameters of `pinst` to their values, including default values provided by `pmodule`. 
-        Raises a `RuntimeError` if any required parameter is not defined. 
+    # @classmethod
+    # def get_instance_params(
+    #     cls, pinst: vlsir.circuit.Instance, pmodule: ModuleLike
+    # ) -> ResolvedParams:
+    #     """ Resolve the parameters of `pinst` to their values, including default values provided by `pmodule`.
+    #     Raises a `RuntimeError` if any required parameter is not defined.
 
-        Note this method *does not* raise errors for parameters *not specified* in `pmodule`, 
-        allowing for "pass-through" parameters not explicitly defined. """
+    #     Note this method *does not* raise errors for parameters *not specified* in `pmodule`,
+    #     allowing for "pass-through" parameters not explicitly defined. """
 
-        values = dict()
+    #     values = dict()
 
-        # Step through each of `pmodule`'s declared parameters first, applying defaults if necessary
-        for mparam in pmodule.parameters:
-            if mparam.name in pinst.parameters:  # Specified by the Instance
-                inst_pval = pinst.parameters.pop(mparam.name)
-                values[mparam.name] = cls.get_param_value(inst_pval)
-            else:  # Not specified by the instance. Apply the default, or fail.
-                pdefault = cls.get_param_default(mparam)
-                if pdefault is None:
-                    msg = f"Required parameter `{mparam.name}` not specified for Instance `{pinst}`"
-                    raise RuntimeError(msg)
-                values[mparam.name] = pdefault
+    #     # Step through each of `pmodule`'s declared parameters first, applying defaults if necessary
+    #     for mparam in pmodule.parameters:
+    #         if mparam.name in pinst.parameters:  # Specified by the Instance
+    #             inst_pval = pinst.parameters.pop(mparam.name)
+    #             values[mparam.name] = cls.get_param_value(inst_pval)
+    #         else:  # Not specified by the instance. Apply the default, or fail.
+    #             pdefault = cls.get_param_default(mparam)
+    #             if pdefault is None:
+    #                 msg = f"Required parameter `{mparam.name}` not specified for Instance `{pinst}`"
+    #                 raise RuntimeError(msg)
+    #             values[mparam.name] = pdefault
 
-        # Convert the remaining instance-provided parameters to strings
-        for (pname, pval) in pinst.parameters.items():
-            values[pname] = cls.get_param_value(pval)
+    #     # Convert the remaining instance-provided parameters to strings
+    #     for (pname, pval) in pinst.parameters.items():
+    #         values[pname] = cls.get_param_value(pval)
 
-        # And wrap the resolved values in a `ResolvedParams` object
-        return ResolvedParams(values)
+    #     # And wrap the resolved values in a `ResolvedParams` object
+    #     return ResolvedParams(values)
 
-    @classmethod
-    def get_module_name(cls, module: vlsir.circuit.Module) -> str:
-        """ Create a netlist-compatible name for proto-Module `module` """
+    # @classmethod
+    # def get_module_name(cls, module: vlsir.circuit.Module) -> str:
+    #     """ Create a netlist-compatible name for proto-Module `module` """
 
-        # Create the module name
-        # Replace all format-invalid characters with underscores
-        name = module.name.split(".")[-1]
-        for ch in name:
-            if not (ch.isalpha() or ch.isdigit() or ch == "_"):
-                name = name.replace(ch, "_")
-        return name
+    #     # Create the module name
+    #     # Replace all format-invalid characters with underscores
+    #     name = module.name.split(".")[-1]
+    #     for ch in name:
+    #         if not (ch.isalpha() or ch.isdigit() or ch == "_"):
+    #             name = name.replace(ch, "_")
+    #     return name
 
-    def resolve_reference(self, ref: vlsir.utils.Reference) -> ResolvedModule:
-        """ Resolve the `ModuleLike` referent of `ref`. """
+    # def resolve_reference(self, ref: vlsir.utils.Reference) -> ResolvedModule:
+    #     """ Resolve the `ModuleLike` referent of `ref`. """
 
-        if ref.WhichOneof("to") == "local":  # Internally-defined Module
-            module = self.pmodules.get(ref.local, None)
-            if module is None:
-                raise RuntimeError(f"Invalid undefined Module {ref.local} ")
-            return ResolvedModule(
-                module=module,
-                module_name=self.get_module_name(module),
-                spice_prefix=SpicePrefix.SUBCKT,
-            )
+    #     if ref.WhichOneof("to") == "local":  # Internally-defined Module
+    #         module = self.pmodules.get(ref.local, None)
+    #         if module is None:
+    #             raise RuntimeError(f"Invalid undefined Module {ref.local} ")
+    #         return ResolvedModule(
+    #             module=module,
+    #             module_name=self.get_module_name(module),
+    #             spice_prefix=SpicePrefix.SUBCKT,
+    #         )
 
-        if ref.WhichOneof("to") == "external":  # Defined outside package
+    #     if ref.WhichOneof("to") == "external":  # Defined outside package
 
-            # First check the priviledged/ internally-defined domains
-            if ref.external.domain == "vlsir.primitives":
-                # Built-in primitive. Load its definition from the `vlsir.primitives` (python) module.
-                name = ref.external.name
-                module = vlsir.primitives.dct.get(ref.external.name, None)
-                if module is None:
-                    raise RuntimeError(f"Invalid undefined primitive {ref.external}")
+    #         # First check the priviledged/ internally-defined domains
+    #         if ref.external.domain == "vlsir.primitives":
+    #             # Built-in primitive. Load its definition from the `vlsir.primitives` (python) module.
+    #             name = ref.external.name
+    #             module = vlsir.primitives.dct.get(ref.external.name, None)
+    #             if module is None:
+    #                 raise RuntimeError(f"Invalid undefined primitive {ref.external}")
 
-                # Mapping from primitive-name to spice-prefix
-                prefixes = dict(
-                    resistor=SpicePrefix.RESISTOR,
-                    capacitor=SpicePrefix.CAPACITOR,
-                    inductor=SpicePrefix.INDUCTOR,
-                    vdc=SpicePrefix.VSOURCE,
-                    vpulse=SpicePrefix.VSOURCE,
-                    vpwl=SpicePrefix.VSOURCE,
-                    vsin=SpicePrefix.VSOURCE,
-                    isource=SpicePrefix.ISOURCE,
-                    vcvs=SpicePrefix.VCVS,
-                    vccs=SpicePrefix.VCCS,
-                    cccs=SpicePrefix.CCCS,
-                    ccvs=SpicePrefix.CCVS,
-                    mos=SpicePrefix.MOS,
-                    bipolar=SpicePrefix.BIPOLAR,
-                    diode=SpicePrefix.DIODE,
-                )
+    #             # Mapping from primitive-name to spice-prefix
+    #             prefixes = dict(
+    #                 resistor=SpicePrefix.RESISTOR,
+    #                 capacitor=SpicePrefix.CAPACITOR,
+    #                 inductor=SpicePrefix.INDUCTOR,
+    #                 vdc=SpicePrefix.VSOURCE,
+    #                 vpulse=SpicePrefix.VSOURCE,
+    #                 vpwl=SpicePrefix.VSOURCE,
+    #                 vsin=SpicePrefix.VSOURCE,
+    #                 isource=SpicePrefix.ISOURCE,
+    #                 vcvs=SpicePrefix.VCVS,
+    #                 vccs=SpicePrefix.VCCS,
+    #                 cccs=SpicePrefix.CCCS,
+    #                 ccvs=SpicePrefix.CCVS,
+    #                 mos=SpicePrefix.MOS,
+    #                 bipolar=SpicePrefix.BIPOLAR,
+    #                 diode=SpicePrefix.DIODE,
+    #             )
 
-                if name not in prefixes:
-                    raise ValueError(f"Unsupported or Invalid Ideal Primitive {ref}")
+    #             if name not in prefixes:
+    #                 raise ValueError(f"Unsupported or Invalid Ideal Primitive {ref}")
 
-                return ResolvedModule(
-                    module=module,
-                    module_name=module.name.name,
-                    spice_prefix=prefixes[name],
-                )
+    #             return ResolvedModule(
+    #                 module=module,
+    #                 module_name=module.name.name,
+    #                 spice_prefix=prefixes[name],
+    #             )
 
-            if ref.external.domain == "hdl21.primitives":
-                msg = f"Invalid direct-netlisting of physical `hdl21.Primitive` `{ref.external.name}`. "
-                msg += "Either compile to a target technology, or replace with an `ExternalModule`. "
-                raise RuntimeError(msg)
+    #         if ref.external.domain == "hdl21.primitives":
+    #             msg = f"Invalid direct-netlisting of physical `hdl21.Primitive` `{ref.external.name}`. "
+    #             msg += "Either compile to a target technology, or replace with an `ExternalModule`. "
+    #             raise RuntimeError(msg)
 
-            if ref.external.domain == "hdl21.ideal":
-                # FIXME: complete the deprecation of the dependency on `hdl21`.
-                import warnings
+    #         if ref.external.domain == "hdl21.ideal":
+    #             # FIXME: complete the deprecation of the dependency on `hdl21`.
+    #             import warnings
 
-                msg = f"Pending Deprecation: `hdl21.ideal` primitives. Move to `vlsir.primitives"
-                warnings.warn(msg)
+    #             msg = f"Pending Deprecation: `hdl21.ideal` primitives. Move to `vlsir.primitives"
+    #             warnings.warn(msg)
 
-                # Ideal elements
-                name = ref.external.name
+    #             # Ideal elements
+    #             name = ref.external.name
 
-                # Sort out the spectre-format name
-                if name == "IdealCapacitor":
-                    module_name = "capacitor"
-                    spice_prefix = SpicePrefix.CAPACITOR
-                elif name == "IdealResistor":
-                    module_name = "resistor"
-                    spice_prefix = SpicePrefix.RESISTOR
-                elif name == "IdealInductor":
-                    module_name = "inductor"
-                    spice_prefix = SpicePrefix.INDUCTOR
-                elif name == "VoltageSource":
-                    module_name = "vsource"
-                    spice_prefix = SpicePrefix.VSOURCE
-                elif name == "CurrentSource":
-                    module_name = "isource"
-                    spice_prefix = SpicePrefix.ISOURCE
-                else:
-                    raise ValueError(f"Unsupported or Invalid Ideal Primitive {ref}")
+    #             # Sort out the spectre-format name
+    #             if name == "IdealCapacitor":
+    #                 module_name = "capacitor"
+    #                 spice_prefix = SpicePrefix.CAPACITOR
+    #             elif name == "IdealResistor":
+    #                 module_name = "resistor"
+    #                 spice_prefix = SpicePrefix.RESISTOR
+    #             elif name == "IdealInductor":
+    #                 module_name = "inductor"
+    #                 spice_prefix = SpicePrefix.INDUCTOR
+    #             elif name == "VoltageSource":
+    #                 module_name = "vsource"
+    #                 spice_prefix = SpicePrefix.VSOURCE
+    #             elif name == "CurrentSource":
+    #                 module_name = "isource"
+    #                 spice_prefix = SpicePrefix.ISOURCE
+    #             else:
+    #                 raise ValueError(f"Unsupported or Invalid Ideal Primitive {ref}")
 
-                # Awkwardly, primitives don't naturally have definitions as
-                # either `vlsir.circuit.Module` or `vlsir.circuit.ExternalModule`.
-                # So we create one on the fly.
+    #             # Awkwardly, primitives don't naturally have definitions as
+    #             # either `vlsir.circuit.Module` or `vlsir.circuit.ExternalModule`.
+    #             # So we create one on the fly.
 
-                # FIXME: these two dependencies should be removed!
-                from hdl21.proto.to_proto import ProtoExporter
-                from hdl21.proto.from_proto import ProtoImporter
+    #             # FIXME: these two dependencies should be removed!
+    #             from hdl21.proto.to_proto import ProtoExporter
+    #             from hdl21.proto.from_proto import ProtoImporter
 
-                prim = ProtoImporter.import_hdl21_primitive(ref.external)
-                module = ProtoExporter.export_hdl21_primitive(prim)
-                return ResolvedModule(
-                    module=module, module_name=module_name, spice_prefix=spice_prefix,
-                )
+    #             prim = ProtoImporter.import_hdl21_primitive(ref.external)
+    #             module = ProtoExporter.export_hdl21_primitive(prim)
+    #             return ResolvedModule(
+    #                 module=module, module_name=module_name, spice_prefix=spice_prefix,
+    #             )
 
-            else:  # Externally-Defined, External-Domain `ExternalModule`
-                key = (ref.external.domain, ref.external.name)
-                module = self.ext_modules.get(key, None)
-                if module is None:
-                    msg = f"Invalid Instance of undefined External Module {key}"
-                    raise RuntimeError(msg)
-                # Check for duplicate names which would conflict from other namespaces
-                module_name = ref.external.name
-                if (
-                    module_name in self.ext_module_names
-                    and self.ext_module_names[module_name] is not module
-                ):
-                    msg = f"Conflicting ExternalModule definitions {module} and {self.ext_module_names[module_name]}"
-                    raise RuntimeError(msg)
-                self.ext_module_names[module_name] = module
-                return ResolvedModule(
-                    module=module,
-                    module_name=module_name,
-                    spice_prefix=SpicePrefix.SUBCKT,
-                )
+    #         else:  # Externally-Defined, External-Domain `ExternalModule`
+    #             key = (ref.external.domain, ref.external.name)
+    #             module = self.ext_modules.get(key, None)
+    #             if module is None:
+    #                 msg = f"Invalid Instance of undefined External Module {key}"
+    #                 raise RuntimeError(msg)
+    #             # Check for duplicate names which would conflict from other namespaces
+    #             module_name = ref.external.name
+    #             if (
+    #                 module_name in self.ext_module_names
+    #                 and self.ext_module_names[module_name] is not module
+    #             ):
+    #                 msg = f"Conflicting ExternalModule definitions {module} and {self.ext_module_names[module_name]}"
+    #                 raise RuntimeError(msg)
+    #             self.ext_module_names[module_name] = module
+    #             return ResolvedModule(
+    #                 module=module,
+    #                 module_name=module_name,
+    #                 spice_prefix=SpicePrefix.SUBCKT,
+    #             )
 
-        # Not a Module, not an ExternalModule, not sure what it is
-        raise ValueError(f"Invalid Module reference {ref}")
+    #     # Not a Module, not an ExternalModule, not sure what it is
+    #     raise ValueError(f"Invalid Module reference {ref}")
 
-    def format_connection(self, pconn: vlsir.circuit.Connection) -> str:
-        """ Format a `Connection` reference. 
-        Does not *declare* any new connection objects, but generates references to existing ones. """
-        # Connections are a proto `oneof` union
-        # which includes signals, slices, and concatenations.
-        # Figure out which to import
+    # def format_connection(self, pconn: vlsir.circuit.Connection) -> str:
+    #     """ Format a `Connection` reference.
+    #     Does not *declare* any new connection objects, but generates references to existing ones. """
+    #     # Connections are a proto `oneof` union
+    #     # which includes signals, slices, and concatenations.
+    #     # Figure out which to import
 
-        stype = pconn.WhichOneof("stype")
-        if stype == "sig":
-            return self.format_signal_ref(pconn.sig)
-        if stype == "slice":
-            return self.format_signal_slice(pconn.slice)
-        if stype == "concat":
-            return self.format_concat(pconn.concat)
-        raise ValueError(f"Invalid Connection Type {stype} for Connection {pconn}")
+    #     stype = pconn.WhichOneof("stype")
+    #     if stype == "sig":
+    #         return self.format_signal_ref(pconn.sig)
+    #     if stype == "slice":
+    #         return self.format_signal_slice(pconn.slice)
+    #     if stype == "concat":
+    #         return self.format_concat(pconn.concat)
+    #     raise ValueError(f"Invalid Connection Type {stype} for Connection {pconn}")
 
     def write_header(self) -> None:
         """ Write header commentary 
@@ -551,34 +545,34 @@ class Netlister:
     Virtual `format` Methods 
     """
 
-    @classmethod
-    def format_port_decl(cls, pport: vlsir.circuit.Port) -> str:
-        """ Format a declaration of a `Port` """
-        raise NotImplementedError
+    # @classmethod
+    # def format_port_decl(cls, pport: vlsir.circuit.Port) -> str:
+    #     """ Format a declaration of a `Port` """
+    #     raise NotImplementedError
 
-    @classmethod
-    def format_port_ref(cls, pport: vlsir.circuit.Port) -> str:
-        """ Format a reference to a `Port` """
-        raise NotImplementedError
+    # @classmethod
+    # def format_port_ref(cls, pport: vlsir.circuit.Port) -> str:
+    #     """ Format a reference to a `Port` """
+    #     raise NotImplementedError
 
-    @classmethod
-    def format_signal_decl(cls, psig: vlsir.circuit.Signal) -> str:
-        """ Format a declaration of Signal `psig` """
-        raise NotImplementedError
+    # @classmethod
+    # def format_signal_decl(cls, psig: vlsir.circuit.Signal) -> str:
+    #     """ Format a declaration of Signal `psig` """
+    #     raise NotImplementedError
 
-    @classmethod
-    def format_signal_ref(cls, psig: vlsir.circuit.Signal) -> str:
-        """ Format a reference to Signal `psig` """
-        raise NotImplementedError
+    # @classmethod
+    # def format_signal_ref(cls, psig: vlsir.circuit.Signal) -> str:
+    #     """ Format a reference to Signal `psig` """
+    #     raise NotImplementedError
 
-    @classmethod
-    def format_signal_slice(cls, pslice: vlsir.circuit.Slice) -> str:
-        """ Format Signal-Slice `pslice` """
-        raise NotImplementedError
+    # @classmethod
+    # def format_signal_slice(cls, pslice: vlsir.circuit.Slice) -> str:
+    #     """ Format Signal-Slice `pslice` """
+    #     raise NotImplementedError
 
-    def format_concat(self, pconc: vlsir.circuit.Concat) -> str:
-        """ Format the Concatenation of several other Connections """
-        raise NotImplementedError
+    # def format_concat(self, pconc: vlsir.circuit.Concat) -> str:
+    #     """ Format the Concatenation of several other Connections """
+    #     raise NotImplementedError
 
     @classmethod
     def format_bus_bit(cls, index: Union[int, str]) -> str:
@@ -588,6 +582,10 @@ class Netlister:
     """ 
     Virtual `write` Methods 
     """
+
+    def write_library_section(self, section: LibSection) -> None:
+        """ Write a Library Section definition """
+        raise NotImplementedError
 
     def write_model_def(self, model: ModelDef) -> None:
         """ Write a model definition """

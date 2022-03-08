@@ -7,10 +7,7 @@ import codecs
 from enum import Enum
 from pathlib import Path
 from warnings import warn
-from typing import List, Tuple, Optional
-
-# PyPi Imports
-from pydantic import ValidationError
+from typing import List, Tuple, Optional, Sequence, Union
 
 # Local Imports
 from .dialects import DialectParser
@@ -25,24 +22,33 @@ class ErrorMode(Enum):
 
 
 def parse(
-    path: os.PathLike,
+    src: Union[os.PathLike, Sequence[os.PathLike]],
     *,
     dialect: Optional[NetlistDialects] = None,
     errormode: ErrorMode = ErrorMode.RAISE,
 ) -> Program:
     """ 
     Primary netist-parsing entry point.  
-    Parse a multi-file netlist-`Program` starting at file `path`. 
+    Parse a multi-file netlist-`Program` starting at file or files `src`. 
     
-    Recurses into `path`'s dependencies as indicated by `Include` and `Library` directives.
+    Recurses into `src`'s dependencies as indicated by `Include` and `Library` directives.
 
     Optional argument `dialect` dictates the initial netlist-dialect. 
-    If not provided, the default is inferred from the file-extension of `path`.
+    If not provided, the default is inferred from the file-extension of the first entry in `src`.
     """
 
-    dialect = dialect or default_dialect(path)
+    if not isinstance(src, list):
+        # Cover the case of a single file, or other sequences
+        src = list(src)
+
+    # If an initial dialect has not been provided, infer it from the first file
+    dialect = dialect or default_dialect(src[0])
+
+    # Create the parser, and parse each file
     p = Parser(dialect, errormode)
-    p.parse(path)
+    for path in src:
+        p.parse(path)
+
     for e in p.entries():
         if isinstance(e, Unknown):
             warn(f"Unknown Netlist Entry {e}")
@@ -220,10 +226,6 @@ class HierarchyCollector:
     def nxt(self) -> Optional[Statement]:
         """ Get our next `Statement`, or None if exhausted """
         return next(self.stmts, None)
-        try:
-            return self.stmts.pop(0)
-        except IndexError:
-            return None
 
     def collect(self) -> List[Entry]:
         """ Primary Entry Point. 
@@ -238,6 +240,8 @@ class HierarchyCollector:
                 s = self.collect_subckt(start=stmt)
             elif isinstance(stmt, StartLib):
                 s = self.collect_lib(start=stmt)
+            elif isinstance(stmt, StartLibSection):
+                s = self.collect_lib_section(start=stmt)
             else:
                 s = stmt
             nodes.append(s)
@@ -313,7 +317,7 @@ class HierarchyCollector:
                 msg = "Invalid `EndLibSection` without `StartLibSection`"
                 self.fail(msg)
             elif isinstance(stmt, StartLibSection):
-                s = self.collect_lib_section(start=e)
+                s = self.collect_lib_section(start=stmt)
                 sections.append(s)
             else:
                 msg = f"Invalid statement in library: {stmt}"
