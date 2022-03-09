@@ -4,14 +4,21 @@
 """
 
 # Std-Lib Imports
-from ast import UnaryOp
-from typing import Optional, Union, IO, Dict, Iterable
+from warnings import warn
+from typing import Tuple, Union, IO, Dict, Iterable
 from enum import Enum, auto
 from dataclasses import dataclass, field
 
 
 # Local Imports
 from ..data import *
+
+
+class ErrorMode(Enum):
+    """ Enumerated Error-Response Strategies """
+
+    RAISE = 0  # Raise any generated exceptions
+    COMMENT = 1  # Write errant entries as commments instead
 
 
 class ExpressionState(Enum):
@@ -45,57 +52,6 @@ class SpicePrefix(Enum):
     CCVS = "h"
     # Transmission Lines
     TLINE = "o"
-
-
-# @dataclass
-# class ResolvedModule:
-#     """ Resolved reference to a `Module` or `ExternalModule`.
-#     Includes its spice-language prefix, and if user-defined its netlist-sanitized module-name. """
-
-#     module: ModuleLike
-#     module_name: str
-#     spice_prefix: SpicePrefix
-
-
-@dataclass
-class ResolvedParams:
-    """ Resolved Instance-Parameter Values 
-    Factoring in defaults, and converted to strings. 
-    Largely a wrapper for `Dict[str, str]`, with accessors `get` and `pop` that raise `RuntimeError` if a key is missing. """
-
-    values: Dict[str, str]
-
-    def set(self, key: str, val: str) -> None:
-        """ Set the value of `key` to `val` in the resolved parameters. """
-        self.values[key] = val
-
-    def get(self, key: str) -> str:
-        """ Get the value of `key` from the resolved parameters. 
-        Raises `RuntimeError` if `key` is not present. """
-        if key not in self.values:
-            raise RuntimeError(f"Missing parameter {key}")
-        return self.values[key]
-
-    def pop(self, key: str) -> str:
-        """ Get the value of `key` from the resolved parameters, and remove it from the `ResolvedParams`. 
-        Raises `RuntimeError` if `key` is not present. """
-        if key not in self.values:
-            raise RuntimeError(f"Missing parameter {key}")
-        return self.values.pop(key)
-
-    def pop_many(self, keys: Iterable[str]) -> Dict[str, str]:
-        """ Get the values of `keys` from the resolved parameters, and remove them from the `ResolvedParams`. 
-        Raises `RuntimeError` if any `key` is not present. """
-        return {key: self.pop(key) for key in keys}
-
-    @property
-    def items(self):
-        return self.values.items
-
-    def __bool__(self):
-        """ Boolean conversions, generally through the `not` keyword or `bool` constructor, 
-        are forwarded down to the internal values dictionary. """
-        return bool(self.values)
 
 
 @dataclass
@@ -157,9 +113,12 @@ class Netlister:
     * `get_*` methods, which retrieve some internal data, e.g. extracting the type of a `Connection`. 
     """
 
-    def __init__(self, src: Program, dest: IO):
+    def __init__(
+        self, src: Program, dest: IO, *, errormode: ErrorMode = ErrorMode.RAISE
+    ) -> None:
         self.src = src
         self.dest = dest
+        self.errormode = errormode
         self.expr_state = ExpressionState.PROGRAM
         self.indent = Indent(chars="  ")
         self.module_names = set()  # Netlisted Module names
@@ -185,6 +144,17 @@ class Netlister:
         # And ensure all output makes it to `self.dest`
         self.dest.flush()
 
+    def fail(self, entry: Entry, msg: str) -> None:
+        """ React to a failure, depending on `self.errormode`. """
+        if self.errormode is ErrorMode.RAISE:
+            raise RuntimeError(msg)
+        elif self.errormode is ErrorMode.COMMENT:
+            msg = f"Warning: invalid Entry {entry}".replace("\n", " ")
+            warn(msg)
+            self.write_comment(msg)
+        else:
+            raise ValueError(f"Unknown error mode {self.errormode}")
+
     def write_source_file(self, file: SourceFile) -> None:
         """ Write the content of `file` to `self.dest`. """
         self.write_comment(f"Source File: {file.path}")
@@ -192,7 +162,7 @@ class Netlister:
             self.write_entry(entry)
 
     def write_entry(self, entry: Entry) -> None:
-        """ Dispatch across the various entry types. """
+        """ Write an `Entry`. Primarily dispatches across the `Entry` union-types. """
 
         if isinstance(entry, SubcktDef):
             return self.write_subckt_def(entry)
@@ -227,9 +197,9 @@ class Netlister:
         unsupported = (DialectChange, FunctionDef, Unknown, AhdlInclude, Library)
         # FIXME: is writing `Library` even really a thing?
         if isinstance(entry, unsupported):
-            raise ValueError(f"Unsupported Entry: {entry}")
+            return self.fail(entry, f"Unsupported Entry: {entry}")
 
-        raise TypeError(f"Invalid or Unsupported Entry: {entry}")
+        return self.fail(entry, f"Invalid Entry: {entry}")
 
     def write(self, s: str) -> None:
         """ Helper/wrapper, passing to `self.dest` """
@@ -238,68 +208,6 @@ class Netlister:
     def writeln(self, s: str) -> None:
         """ Write `s` as a line, at our current `indent` level. """
         self.write(f"{self.indent.state}{s}\n")
-
-    # def get_external_module(self, emod: vlsir.circuit.ExternalModule) -> None:
-    #     """ Visit an ExternalModule definition.
-    #     "Netlisting" these doesn't actually write anything,
-    #     but just stores a reference  in internal dictionary `ext_modules`
-    #     for future references to them. """
-    #     key = (emod.name.domain, emod.name.name)
-    #     if key in self.ext_modules:
-    #         raise RuntimeError(f"Invalid doubly-defined external module {emod}")
-    #     self.ext_modules[key] = emod
-
-    # @classmethod
-    # def get_param_default(cls, pparam: vlsir.circuit.Parameter) -> Optional[str]:
-    #     """ Get the default value of `pparam`. Returns `None` for no default. """
-    #     if pparam.default.WhichOneof("value") is None:
-    #         return None
-    #     return cls.get_param_value(pparam.default)
-
-    # @classmethod
-    # def get_param_value(cls, ppval: vlsir.circuit.ParameterValue) -> str:
-    #     """ Get a string representation of a parameter-value """
-    #     ptype = ppval.WhichOneof("value")
-    #     if ptype == "integer":
-    #         return str(int(ppval.integer))
-    #     if ptype == "double":
-    #         return str(float(ppval.double))
-    #     if ptype == "string":
-    #         return str(ppval.string)
-    #     if ptype == "literal":
-    #         return str(ppval.literal)
-    #     raise ValueError
-
-    # @classmethod
-    # def get_instance_params(
-    #     cls, pinst: vlsir.circuit.Instance, pmodule: ModuleLike
-    # ) -> ResolvedParams:
-    #     """ Resolve the parameters of `pinst` to their values, including default values provided by `pmodule`.
-    #     Raises a `RuntimeError` if any required parameter is not defined.
-
-    #     Note this method *does not* raise errors for parameters *not specified* in `pmodule`,
-    #     allowing for "pass-through" parameters not explicitly defined. """
-
-    #     values = dict()
-
-    #     # Step through each of `pmodule`'s declared parameters first, applying defaults if necessary
-    #     for mparam in pmodule.parameters:
-    #         if mparam.name in pinst.parameters:  # Specified by the Instance
-    #             inst_pval = pinst.parameters.pop(mparam.name)
-    #             values[mparam.name] = cls.get_param_value(inst_pval)
-    #         else:  # Not specified by the instance. Apply the default, or fail.
-    #             pdefault = cls.get_param_default(mparam)
-    #             if pdefault is None:
-    #                 msg = f"Required parameter `{mparam.name}` not specified for Instance `{pinst}`"
-    #                 raise RuntimeError(msg)
-    #             values[mparam.name] = pdefault
-
-    #     # Convert the remaining instance-provided parameters to strings
-    #     for (pname, pval) in pinst.parameters.items():
-    #         values[pname] = cls.get_param_value(pval)
-
-    #     # And wrap the resolved values in a `ResolvedParams` object
-    #     return ResolvedParams(values)
 
     # @classmethod
     # def get_module_name(cls, module: vlsir.circuit.Module) -> str:
@@ -436,22 +344,6 @@ class Netlister:
     #     # Not a Module, not an ExternalModule, not sure what it is
     #     raise ValueError(f"Invalid Module reference {ref}")
 
-    # def format_connection(self, pconn: vlsir.circuit.Connection) -> str:
-    #     """ Format a `Connection` reference.
-    #     Does not *declare* any new connection objects, but generates references to existing ones. """
-    #     # Connections are a proto `oneof` union
-    #     # which includes signals, slices, and concatenations.
-    #     # Figure out which to import
-
-    #     stype = pconn.WhichOneof("stype")
-    #     if stype == "sig":
-    #         return self.format_signal_ref(pconn.sig)
-    #     if stype == "slice":
-    #         return self.format_signal_slice(pconn.slice)
-    #     if stype == "concat":
-    #         return self.format_concat(pconn.concat)
-    #     raise ValueError(f"Invalid Connection Type {stype} for Connection {pconn}")
-
     def write_header(self) -> None:
         """ Write header commentary 
         This proves particularly important for many Spice-like formats, 
@@ -471,42 +363,49 @@ class Netlister:
         """ Format an identifier. Default just returns its string `name`. """
         return ident.name
 
+    def expression_delimiters(self) -> Tuple[str, str]:
+        """ Return the starting and closing delimiters for expressions. """
+        # Base case: single-ticks
+        return ("'", "'")
+
+    def format_number(self, num: Union[Int, Float, MetricNum]) -> str:
+        """ Format a numeric literal. """
+        return str(num.val)
+
     def format_expr(self, expr: Expr) -> str:
         """ Format a mathematical Expression. 
         Primarily dispatches across the `Expr` type-union. """
 
         # Scalar literals. Return their string value.
         if isinstance(expr, (Int, Float, MetricNum)):
-            return str(expr.val)
-        elif isinstance(expr, Ident):
-            return self.format_ident(expr)  # Identifiers
+            return self.format_number(expr)
 
-        # Everything else is some form of compound expression, e.g. a function call, add or ternary op.
+        # Everything else is some form of compound expression, e.g. a function call, add, or reference to another parameter.
         # If we are not already in a sub-expression, write the evaluator character.
         if self.expr_state != ExpressionState.EXPR:
             self.expr_state = ExpressionState.EXPR
-            rv = "{"  # FIXME: make dialect-specific expr-opener
+            rv = self.expression_delimiters()[0]
             close_me_please = True
         else:
             rv = ""
             close_me_please = False
 
-        if isinstance(expr, UnaryOp):
+        if isinstance(expr, Ident):
+            rv += self.format_ident(expr)  # Identifiers
+        elif isinstance(expr, UnaryOp):
             rv += self.format_unary_op(expr)  # Unary Operators
         elif isinstance(expr, BinaryOp):
             rv += self.format_binary_op(expr)
         elif isinstance(expr, Call):
             rv += self.format_function_call(expr)
-
-        # Carve out these explicitly unsupported (at least for now) cases:
         elif isinstance(expr, TernOp):
-            raise RuntimeError(f"Unsupported Expression Type {expr}")
+            rv += self.format_ternary_op(expr)
         else:
             raise TypeError(f"Invalid or Unsupported Expression {expr}")
 
         if close_me_please:
             self.expr_state = ExpressionState.PROGRAM
-            rv += "}"  # FIXME: make dialect-specific expr-closer
+            rv += self.expression_delimiters()[1]
 
         return rv
 
@@ -517,6 +416,10 @@ class Netlister:
         targ = self.format_expr(op.targ)
 
         return f"{operator}{targ}"
+
+    def format_unary_operator(self, tp: UnaryOperator) -> str:
+        """ Format a unary operator """
+        return tp.value
 
     def format_binary_op(self, op: BinaryOp) -> str:
         """ Format a binary operation . """
@@ -531,9 +434,14 @@ class Netlister:
         """ Format a binary operator """
         return tp.value
 
-    def format_unary_operator(self, tp: UnaryOperator) -> str:
-        """ Format a unary operator """
-        return tp.value
+    def format_ternary_op(self, op: TernOp) -> str:
+        """ Format a ternary operation. """
+
+        cond = self.format_expr(op.cond)
+        if_true = self.format_expr(op.if_true)
+        if_false = self.format_expr(op.if_false)
+
+        return f"{cond} ? {if_true} : {if_false}"
 
     def format_function_call(self, call: Call) -> str:
         """ Format a function-call expression. """
@@ -545,35 +453,6 @@ class Netlister:
     Virtual `format` Methods 
     """
 
-    # @classmethod
-    # def format_port_decl(cls, pport: vlsir.circuit.Port) -> str:
-    #     """ Format a declaration of a `Port` """
-    #     raise NotImplementedError
-
-    # @classmethod
-    # def format_port_ref(cls, pport: vlsir.circuit.Port) -> str:
-    #     """ Format a reference to a `Port` """
-    #     raise NotImplementedError
-
-    # @classmethod
-    # def format_signal_decl(cls, psig: vlsir.circuit.Signal) -> str:
-    #     """ Format a declaration of Signal `psig` """
-    #     raise NotImplementedError
-
-    # @classmethod
-    # def format_signal_ref(cls, psig: vlsir.circuit.Signal) -> str:
-    #     """ Format a reference to Signal `psig` """
-    #     raise NotImplementedError
-
-    # @classmethod
-    # def format_signal_slice(cls, pslice: vlsir.circuit.Slice) -> str:
-    #     """ Format Signal-Slice `pslice` """
-    #     raise NotImplementedError
-
-    # def format_concat(self, pconc: vlsir.circuit.Concat) -> str:
-    #     """ Format the Concatenation of several other Connections """
-    #     raise NotImplementedError
-
     @classmethod
     def format_bus_bit(cls, index: Union[int, str]) -> str:
         """ Format bus-bit `index` """
@@ -582,6 +461,14 @@ class Netlister:
     """ 
     Virtual `write` Methods 
     """
+
+    def write_include(self, inc: Include) -> None:
+        """ Write a file-Include """
+        raise NotImplementedError
+
+    def write_use_lib(self, uselib: UseLib) -> None:
+        """ Write a sectioned Library-usage """
+        raise NotImplementedError
 
     def write_library_section(self, section: LibSection) -> None:
         """ Write a Library Section definition """

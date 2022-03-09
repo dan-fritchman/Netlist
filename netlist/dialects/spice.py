@@ -55,7 +55,15 @@ class SpiceDialectParser(DialectParser):
     def parse_include(self) -> Include:
         """ Parse an Include Statement """
         self.expect(Tokens.INC, Tokens.INCLUDE)
-        path = self.parse_quote_string()
+        if self.peek().tp in (Tokens.TICK, Tokens.DUBQUOTE):
+            path = self.parse_quote_string()
+        else:
+            # Parse a non-quoted path, which will generally be comprised of more than one token.
+            path = ""
+            while self.match_any(
+                Tokens.IDENT, Tokens.DOT, Tokens.SLASH, Tokens.BACKSLASH
+            ):
+                path += self.cur.val
         self.expect(Tokens.NEWLINE)
         return Include(path)
 

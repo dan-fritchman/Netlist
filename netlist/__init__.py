@@ -11,4 +11,5 @@ from .data import *
 from .dialects import *
 from .parse import *
 from .write import *
+from .convert import *
 

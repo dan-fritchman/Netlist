@@ -250,6 +250,10 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
 
     def parse_start_section(self):
         self.expect(Tokens.SECTION)
+
+        if self.match(Tokens.EQUALS):
+            ...  # Apparently there is an optional "=" character here
+
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
         self.expect(Tokens.NEWLINE)

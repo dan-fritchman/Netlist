@@ -7,7 +7,7 @@ import codecs
 from enum import Enum
 from pathlib import Path
 from warnings import warn
-from typing import List, Tuple, Optional, Sequence, Union
+from typing import List, Tuple, Optional, Sequence, Union, Set
 
 # Local Imports
 from .dialects import DialectParser
@@ -15,7 +15,7 @@ from .data import *
 
 
 class ErrorMode(Enum):
-    """ Enumerated Responses to Parsing Errors """
+    """ Enumerated Error-Response Strategies """
 
     RAISE = 0  # Raise any generated exceptions
     STORE = 1  # Store error-generating content in `Unknown` elements
@@ -37,21 +37,22 @@ def parse(
     If not provided, the default is inferred from the file-extension of the first entry in `src`.
     """
 
+    # Cover the cases of a single file
     if not isinstance(src, list):
-        # Cover the case of a single file, or other sequences
-        src = list(src)
+        src = [src]
 
     # If an initial dialect has not been provided, infer it from the first file
     dialect = dialect or default_dialect(src[0])
 
     # Create the parser, and parse each file
-    p = Parser(dialect, errormode)
-    for path in src:
-        p.parse(path)
+    p = Parser(src, dialect, errormode)
+    p.parse()
 
     for e in p.entries():
         if isinstance(e, Unknown):
             warn(f"Unknown Netlist Entry {e}")
+
+    # Return the parsed `Program`
     return p.program
 
 
@@ -68,7 +69,7 @@ def default_dialect(path: os.PathLike) -> NetlistDialects:
     p = Path(path).absolute()
     if not p.exists() or not p.is_file():
         raise FileNotFoundError(p)
-    if p.suffix == "scs":
+    if p.suffix == ".scs":
         return NetlistDialects.SPECTRE
     return NetlistDialects.SPECTRE_SPICE
 
@@ -76,60 +77,85 @@ def default_dialect(path: os.PathLike) -> NetlistDialects:
 class Parser:
     """ Multi-File "Netlist Program" Parser """
 
-    def __init__(
-        self, dialect: NetlistDialects, errormode: ErrorMode = ErrorMode.RAISE
-    ):
-        self.deps: List[Path] = []
+    def __init__(self, src: List[Path], dialect: NetlistDialects, errormode: ErrorMode):
+        self.pending: List[Path] = [Path(s).absolute() for s in src]
+
+        # Initialize the dialects for each file
+        self.pending_dialects = {s: dialect for s in self.pending}
+
+        self.done: Set[Path] = set()
         self.program = Program([])
         self.errormode = errormode
         self.dialect = dialect
-        self.file_parser = FileParser(dialect, errormode)
+        self.file_parser = None  ##FileParser(dialect, errormode)
 
-    def parse_file(self, p: Path):
-        """ Parse a single file, including any follow-on steps """
+    def parse(self) -> None:
+        """ Parse all specified input, including (potentially recursive) dependencies. """
 
-        # Perform our primary file-parsing, to a list of Entries
-        path, stmts = self.file_parser.parse(p)
-        # Filter out a few things
-        stmts = [e for e in stmts if not isinstance(e, DialectChange)]
-        # And form into a scope-hierarchical tree
-        return hierarchicalize(path, stmts)
+        while self.pending:
+            sourcefile = self.parse_one()
+            self.program.files.append(sourcefile)
 
-    def parse(self, path: os.PathLike):
+    def parse_one(self) -> SourceFile:
+        """ Parse a single file, returning its resultant `SourceFile` tree. 
+        Note the result-value *is not* stored in `self.program`. """
+
+        path = self.pending.pop()
+
         # Check for validity of source file
         p = Path(path).absolute()
         if not p.exists() or not p.is_file():
             raise FileNotFoundError(p)
 
-        # Source Found; Start Parsing
-        self.deps.append(p)
-        f = self.parse_file(p)
-        # Add it to our parsed result
-        self.program.files.append(f)
-        # And recursively descend into files it depends upon
-        self.recurse(f)
+        # Source found; start parsing, to a list of Statements
+        self.dialect = self.pending_dialects[p]
+        self.file_parser = FileParser(self.dialect, self.errormode)
+        path, stmts = self.file_parser.parse(p)
+        self.done.add(p)
 
-    def recurse(self, f: SourceFile):
+        # Filter out a few things
+        stmts = [e for e in stmts if not isinstance(e, DialectChange)]
+
+        # Recursively descend into files it depends upon
+        file_stmts = [e for e in stmts if isinstance(e, (Include, UseLib))]
+        self.recurse(path, file_stmts)
+
+        # Form into a scope-hierarchical tree, and add it to our result-`Program`
+        sourcefile = hierarchicalize(path, stmts)
+        return sourcefile
+
+    def recurse(self, path: Path, contents: List[Statement]):
         """ Parse included-files in SourceFile `f` """
-        for s in f.contents:
+        for s in contents:
             if isinstance(s, (Include, UseLib)):
                 # Differentiate absolute vs relative paths, relative to active source-file
-                incp = s.path if s.path.is_absolute() else f.path.parent / s.path
+                incp = s.path if s.path.is_absolute() else path.parent / s.path
                 incp = incp.resolve()
                 if not incp.exists() or not incp.is_file():
                     raise FileNotFoundError(incp)
-                if incp in self.deps:
+                if incp in self.done:
                     continue
 
-                from .dialects.spectre import SpectreMixin
-
-                if isinstance(self.dialect, SpectreMixin):
+                # Sort out the initial dialect for the new file.
+                # Spectre-family dialects expect included files to start in the dialect indicated by their file-extension.
+                # All other dialects (that we know of) include files in their own dialect.
+                if self.dialect in (
+                    NetlistDialects.SPECTRE,
+                    NetlistDialects.SPECTRE_SPICE,
+                ):
                     # Update our dialect based on the file-extension we load
-                    d_enum = default_dialect(incp)
-                    self.file_parser = FileParser(d_enum)
-                else:
-                    self.file_parser = FileParser(self.dialect)
-                self.parse(incp)
+                    dialect_enum = default_dialect(incp)
+                    # self.file_parser = FileParser(dialect_enum)
+                else:  # Keep our existing dialect
+                    dialect_enum = self.dialect
+                    # self.file_parser = FileParser(dialect_enum)
+
+                # Add the file and its dialect to the pending-queue
+                self.pending.append(incp)
+                self.pending_dialects[incp] = dialect_enum
+
+                # # And kick off parsing of the included file
+                # self.parse(incp)
 
     def entries(self):
         """ Iterator of all parsed Entries """
@@ -224,7 +250,7 @@ class HierarchyCollector:
         self.stmts = iter(stmts)
 
     def nxt(self) -> Optional[Statement]:
-        """ Get our next `Statement`, or None if exhausted """
+        """ Get our next `Statement`, or `None` if exhausted """
         return next(self.stmts, None)
 
     def collect(self) -> List[Entry]:

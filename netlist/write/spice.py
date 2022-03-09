@@ -34,15 +34,13 @@ heavily re-using a central `SpiceNetlister` class, but requiring simulator-speci
 
 # Std-Lib Imports
 import sys
-from enum import Enum 
+from enum import Enum
 from warnings import warn
-from typing import Dict, Union, List
+from typing import Tuple, Union, List
 
 # Local Imports
 from ..data import *
-
-# Import the base-class
-from .base import Netlister
+from .base import Netlister, ErrorMode
 
 
 class SpiceNetlister(Netlister):
@@ -148,7 +146,18 @@ class SpiceNetlister(Netlister):
 
         self.write("+ ")
         for arg in pinst.args:
-            self.write(self.format_expr(arg) + " ")
+            # FIXME: at this point, we don't really know which of these arguments
+            # is a connection, and which is a positional parameter-value.
+            # This matters in some contexts, as parameters can be expressions,
+            # which may need some expression-evaluation syntax.
+            # For now, if the arguments are not scalars (identifiers or numbers), fail.
+            if isinstance(arg, Ident):
+                self.write(self.format_ident(arg) + " ")
+            elif isinstance(arg, (Int, Float, MetricNum)):
+                self.write(self.format_number(arg) + " ")
+            else:
+                msg = f"Primitive instance {pinst.name} has non-scalar argument {arg}"
+                raise RuntimeError(msg)
         self.write(" \n")
 
         self.write("+ ")
@@ -372,7 +381,18 @@ class SpiceNetlister(Netlister):
         self.write(f".lib {self.format_ident(section.name)}\n")
         for entry in section.entries:
             self.write_entry(entry)
-        self.write(f".endl {self.format_ident(section.name)}\n")
+        self.write(f".endl {self.format_ident(section.name)}\n\n")
+
+    def write_include(self, inc: Include) -> None:
+        """ Write a file-Include """
+        # Format: `.include {path} `
+        self.write(f".include {str(inc.path)}\n\n")
+
+    def write_use_lib(self, uselib: UseLib) -> None:
+        """ Write a sectioned Library-usage """
+        # Format: `.lib {path} {section}`
+        # Note quotes here are interpreted as part of `section`, and generally must be avoided.
+        self.write(f".lib {str(uselib.path)} {self.format_ident(uselib.section)} \n\n")
 
 
 class HspiceNetlister(SpiceNetlister):
@@ -442,9 +462,9 @@ class XyceNetlister(SpiceNetlister):
         So, just use it all the time. """
         self.write(f"; {comment}\n")
 
-    def format_expression(self, expr: str) -> str:
-        # Xyce expressions are wrapped in curly braces.
-        return f"{{{expr}}}"
+    def expression_delimiters(self) -> Tuple[str, str]:
+        """ Return the starting and closing delimiters for expressions. """
+        return ("{", "}")
 
     def write_options(self, options: Options) -> None:
         """ Write Options `options` 

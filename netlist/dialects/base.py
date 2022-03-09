@@ -149,6 +149,13 @@ class DialectParser:
         if not self.match_any(*tp):
             self.fail(f"Invalid token: {self.nxt}, expecting one of {tp}")
 
+    def expect_any(self, *tp: List[str]) -> Tokens:
+        """ Assertion that our next token matches one of `tp`, and return the one it was. """
+        rv = self.match_any(*tp)
+        if rv is None:
+            self.fail()
+        return rv
+
     def parse(self, f=None) -> Any:
         """ Perform parsing. Succeeds if top-level is parsable by function `f`.
         Defaults to parsing `Expr`. """
@@ -310,7 +317,10 @@ class DialectParser:
     def parse_param_declarations(self) -> List[ParamDecl]:
         """ Parse a set of parameter declarations """
         term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
-        return self.parse_list(self.parse_param_declaration, term=term)
+        MAXN = 100_000
+        # Believe it or not, we do find real netlists with more than `parse_list`'s default (10k) parameters
+        # defined in a single `.param` statement. Set MAXN to 100k to be safe.
+        return self.parse_list(self.parse_param_declaration, term=term, MAXN=MAXN)
 
     def parse_param_values(self) -> List[ParamVal]:
         """ ( ident = expr )* """
@@ -451,9 +461,12 @@ class DialectParser:
         """ Parse a quoted string, ignoring internal token-types, 
         solely appending them to a return-value string. 
         FIXME: check for newlines, EOF, etc. """
-        self.expect(Tokens.DUBQUOTE)
+
+        # Get the opening quote, which may be single or double
+        tp = self.expect_any(Tokens.DUBQUOTE, Tokens.TICK)
         rv = ""
-        while not self.match(Tokens.DUBQUOTE):
+        # And accumulate until we hit a matching closing quote
+        while not self.match(tp):
             rv += self.peek().val
             self.advance()
         return rv

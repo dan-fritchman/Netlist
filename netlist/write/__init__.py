@@ -10,6 +10,7 @@ from enum import Enum
 
 # Local Imports
 from ..data import NetlistDialects, NetlistFormatSpec, Program
+from .base import ErrorMode
 from .spice import (
     SpiceNetlister,
     HspiceNetlister,
@@ -41,7 +42,12 @@ def writer(fmt: NetlistDialects = NetlistDialects.XYCE) -> type:
         return CdlNetlister
 
 
-def netlist(src: Program, dest: IO, fmt: NetlistFormatSpec = "xyce") -> None:
+def netlist(
+    src: Program,
+    dest: IO,
+    fmt: NetlistFormatSpec = "xyce",
+    errormode: ErrorMode = ErrorMode.RAISE,
+) -> None:
     """ Write netlist-`Program` `src` to destination `dest`. 
 
     Example usages: 
@@ -66,7 +72,7 @@ def netlist(src: Program, dest: IO, fmt: NetlistFormatSpec = "xyce") -> None:
     """
     fmt_enum = NetlistDialects.get(fmt)
     netlister_cls = writer(fmt_enum)
-    netlister = netlister_cls(src, dest)
+    netlister = netlister_cls(src=src, dest=dest, errormode=errormode)
     netlister.netlist()
 
 
