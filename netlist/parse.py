@@ -2,12 +2,12 @@
 # Netlist Parsing 
 """
 
-import os
-import codecs
+import os, copy, codecs
 from enum import Enum
 from pathlib import Path
 from warnings import warn
 from typing import List, Tuple, Optional, Sequence, Union, Set
+from pydantic.dataclasses import dataclass
 
 # Local Imports
 from .dialects import DialectParser
@@ -21,31 +21,39 @@ class ErrorMode(Enum):
     STORE = 1  # Store error-generating content in `Unknown` elements
 
 
+@dataclass
+class ParseOptions:
+    """ Parse Options """
+
+    dialect: Optional[NetlistDialects] = None  # Initial netlist dialect
+    errormode: ErrorMode = ErrorMode.RAISE  # Error-handling mode, enumerated in `ErrorMode`
+    recurse: bool = True  # Whether to recurse into dependent & included files
+
+
 def parse(
     src: Union[os.PathLike, Sequence[os.PathLike]],
     *,
-    dialect: Optional[NetlistDialects] = None,
-    errormode: ErrorMode = ErrorMode.RAISE,
+    options: Optional[ParseOptions] = None,
 ) -> Program:
     """ 
     Primary netist-parsing entry point.  
     Parse a multi-file netlist-`Program` starting at file or files `src`. 
-    
-    Recurses into `src`'s dependencies as indicated by `Include` and `Library` directives.
-
-    Optional argument `dialect` dictates the initial netlist-dialect. 
-    If not provided, the default is inferred from the file-extension of the first entry in `src`.
+    Optional argument `options` sets all behavior laid out by the `ParseOptions` class. 
     """
+
+    if options is None:  # If not provided, create the default `ParseOptions`.
+        options = ParseOptions()
 
     # Cover the cases of a single file
     if not isinstance(src, list):
         src = [src]
 
     # If an initial dialect has not been provided, infer it from the first file
-    dialect = dialect or default_dialect(src[0])
+    if options.dialect is None:
+        options.dialect = default_dialect(src[0])
 
     # Create the parser, and parse each file
-    p = Parser(src, dialect, errormode)
+    p = Parser(src, options)
     p.parse()
 
     for e in p.entries():
@@ -77,17 +85,17 @@ def default_dialect(path: os.PathLike) -> NetlistDialects:
 class Parser:
     """ Multi-File "Netlist Program" Parser """
 
-    def __init__(self, src: List[Path], dialect: NetlistDialects, errormode: ErrorMode):
+    def __init__(
+        self, src: List[Path], options: ParseOptions,
+    ):
+        self.options = options
         self.pending: List[Path] = [Path(s).absolute() for s in src]
-
         # Initialize the dialects for each file
-        self.pending_dialects = {s: dialect for s in self.pending}
-
+        self.pending_dialects = {s: options.dialect for s in self.pending}
         self.done: Set[Path] = set()
         self.program = Program([])
-        self.errormode = errormode
-        self.dialect = dialect
-        self.file_parser = None  ##FileParser(dialect, errormode)
+        self.dialect = options.dialect
+        self.file_parser = None
 
     def parse(self) -> None:
         """ Parse all specified input, including (potentially recursive) dependencies. """
@@ -109,7 +117,7 @@ class Parser:
 
         # Source found; start parsing, to a list of Statements
         self.dialect = self.pending_dialects[p]
-        self.file_parser = FileParser(self.dialect, self.errormode)
+        self.file_parser = FileParser(self.dialect, self.options)
         path, stmts = self.file_parser.parse(p)
         self.done.add(p)
 
@@ -117,8 +125,9 @@ class Parser:
         stmts = [e for e in stmts if not isinstance(e, DialectChange)]
 
         # Recursively descend into files it depends upon
-        file_stmts = [e for e in stmts if isinstance(e, (Include, UseLib))]
-        self.recurse(path, file_stmts)
+        if self.options.recurse:
+            file_stmts = [e for e in stmts if isinstance(e, (Include, UseLib))]
+            self.recurse(path, file_stmts)
 
         # Form into a scope-hierarchical tree, and add it to our result-`Program`
         sourcefile = hierarchicalize(path, stmts)
@@ -169,11 +178,11 @@ class FileParser:
     Produces a flat list of Statement-Entries """
 
     def __init__(
-        self, dialect: NetlistDialects, errormode: ErrorMode = ErrorMode.RAISE
+        self, dialect: NetlistDialects, options: ParseOptions,
     ):
         self.dialect = dialect
         self.dialect_parser = None
-        self.errormode = errormode
+        self.options = options
         self.line_num = 1
 
     def notify(self, reason: DialectChange):
@@ -211,7 +220,7 @@ class FileParser:
                 s = self.dialect_parser.parse_statement()
             except NetlistParseError as e:
                 # Error Handling. Can either include `Unknown` statements, or re-raise.
-                if self.errormode == ErrorMode.RAISE:
+                if self.options.errormode == ErrorMode.RAISE:
                     raise e
                 # Otherwise, we include `Unknown` statements
                 warn(e)  # Issue a warning
@@ -235,7 +244,7 @@ class FileParser:
 
 def hierarchicalize(p: Path, stmts: List[Statement]) -> SourceFile:
     """ Convert a flat list of Statements into a hierarchical tree """
-    nodes = HierarchyCollector(stmts).collect()
+    nodes = HierarchyCollector(stmts).collect_source_file()
     return SourceFile(p, nodes)
 
 
@@ -253,10 +262,14 @@ class HierarchyCollector:
         """ Get our next `Statement`, or `None` if exhausted """
         return next(self.stmts, None)
 
-    def collect(self) -> List[Entry]:
+    def collect_source_file(self) -> List[Entry]:
         """ Primary Entry Point. 
-        Transform a list of flat file-entries to a hierarchical tree of file-nodes. """
+        Transform a list of flat file-entries to a hierarchical tree of file-nodes. 
+        While the return-type is `List[Entry]`, these lists are designed as the content of a `SourceFile`. """
+
         nodes = []
+        params = []  # Collect parameter-declarations into one
+
         while True:
             stmt = self.nxt()
             if stmt is None:
@@ -268,15 +281,32 @@ class HierarchyCollector:
                 s = self.collect_lib(start=stmt)
             elif isinstance(stmt, StartLibSection):
                 s = self.collect_lib_section(start=stmt)
-            else:
+
+            # Append any parameter-declarations to our running list
+            elif isinstance(stmt, ParamDecl):
+                params.append(stmt)
+                continue
+            elif isinstance(stmt, ParamDecls):
+                params.extend(stmt.params)
+                continue
+
+            else:  # Everything else, copy along
                 s = stmt
             nodes.append(s)
+
+        if params:
+            # If we found any parameters, stick them at the beginning of the nodes-list.
+            # This tends to be the most interprable for eventual netlist formats.
+            nodes = [ParamDecls(params)] + nodes
+
         return nodes
 
     def collect_subckt(self, start: StartSubckt) -> SubcktDef:
         """ Collect a sub-circuit definition """
 
         nodes = []
+        params = copy.copy(start.params)
+
         while True:
             stmt = self.nxt()
             if stmt is None:
@@ -289,10 +319,10 @@ class HierarchyCollector:
             # We do so by appending them to any existing `start` parameters,
             # and by *not* repeating the param-declarations in the resultant AST tree.
             if isinstance(stmt, ParamDecl):
-                start.params.append(stmt)
+                params.append(stmt)
                 continue
             elif isinstance(stmt, ParamDecls):
-                start.params.extend(stmt.params)
+                params.extend(stmt.params)
                 continue
 
             if isinstance(stmt, StartSubckt):
@@ -303,13 +333,15 @@ class HierarchyCollector:
             nodes.append(s)
 
         return SubcktDef(
-            name=start.name, ports=start.ports, params=start.params, entries=nodes
+            name=start.name, ports=start.ports, params=params, entries=nodes
         )
 
     def collect_lib_section(self, start: StartLibSection) -> LibSection:
         """ Collect a library section """
 
         nodes = []
+        params = []  # Collect parameter-declarations into one
+
         while True:
             stmt = self.nxt()
             if stmt is None:
@@ -321,14 +353,30 @@ class HierarchyCollector:
                 self.fail()  # these don't nest; something's wrong
             elif isinstance(stmt, StartSubckt):
                 s = self.collect_subckt(start=stmt)
+
+            # Append any parameter-declarations to our running list
+            elif isinstance(stmt, ParamDecl):
+                params.append(stmt)
+                continue
+            elif isinstance(stmt, ParamDecls):
+                params.extend(stmt.params)
+                continue
+
             else:  # Anything else, copy along
                 s = stmt
             nodes.append(s)
+
+        if params:
+            # If we found any parameters, stick them at the beginning of the nodes-list.
+            # This tends to be the most interprable for eventual netlist formats.
+            nodes = [ParamDecls(params)] + nodes
 
         return LibSection(name=start.name, entries=nodes)
 
     def collect_lib(self, start: StartLib) -> Library:
         """ Collect a library definition """
+
+        # FIXME: is this really a thing? Or are we always collecting a `LibSection` at a time?
 
         sections = []
         while True:
