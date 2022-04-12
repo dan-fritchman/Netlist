@@ -88,3 +88,23 @@ For tasks not requiring any in-memory analysis or manipulation, but strict conve
 from netlist import convert
 convert(...)
 ```
+
+## Development 
+
+To get started and install all development dependencies: 
+
+```
+pip install -e ".[dev]"
+```
+
+### Environment Setup 
+
+This project includes bits of collateral for both `setuptools` (`setup.py`) and `poetry` (`pyproject.toml`, by another name).  
+It ultimately uses `setuptools`. 
+
+While `poetry` is great and we love it, and especially love TOML instead of Python for configuration, 
+it's not quite ready for prime time with respect to a few features we use. 
+Especially *editable installs*, i.e. those generated with `pip install -e .`. 
+Note generating these editable installs depends on *not* having a `pyproject.toml` file present, 
+or `pip` generally chokes. Hence the alternate name of the ostensible `pyproject.toml` file. 
+
