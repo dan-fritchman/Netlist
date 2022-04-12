@@ -8,14 +8,14 @@ This includes scope-based name resolution, parameter-value resolution, and the l
 """
 
 # Std-Lib Imports
-from enum import Enum, auto 
+from enum import Enum, auto
 from pathlib import Path
-from typing import Optional, Union, List, Tuple, Dict 
+from typing import Optional, Union, List, Tuple, Dict
 
 # PyPi Imports
 from pydantic.dataclasses import dataclass
 
-# Local Imports 
+# Local Imports
 from .shared import SourceInfo
 
 # Keep a list of datatypes defined here,
@@ -39,6 +39,7 @@ def datatype(cls: type) -> type:
     # And add it to the list of datatypes
     datatypes.append(cls)
     return cls
+
 
 @datatype
 class Ident:
@@ -79,6 +80,7 @@ class ParamVal:
     name: Ident
     val: "Expr"
 
+
 class RefType(Enum):
     """ External Reference Types Enumeration 
     Store on each `ExternalRef` to note which types would be valid in context. """
@@ -93,9 +95,8 @@ class RefType(Enum):
 class ExternalRef:
     """ Typed External Reference """
 
-    name: Ident 
+    name: Ident
     valid_types: List[RefType]
-
 
 
 @datatype
@@ -130,12 +131,12 @@ class PrimitiveInstance:
     Primitives instead store positional and keyword arguments `args` and `kwargs`. 
     """
 
-    name: Ident # Instance Name
-    tp : PrimitiveType # Primitive Element Type
+    name: Ident  # Instance Name
+    tp: PrimitiveType  # Primitive Element Type
 
-    # FIXME: should args/ kwargs resolve to params and ports by here? 
-    args: List["Expr"] # Positional Arguments
-    kwargs: List[ParamVal] # Keyword Arguments 
+    # FIXME: should args/ kwargs resolve to params and ports by here?
+    args: List["Expr"]  # Positional Arguments
+    kwargs: List[ParamVal]  # Keyword Arguments
 
 
 @datatype
@@ -145,14 +146,13 @@ class Options:
     vals: List[ParamVal]  # List of {name: value} pairs
 
 
-
 @datatype
 class SubcktDef:
     """ Sub-Circuit / Module Definition """
 
     name: Ident  # Module/ Subcircuit Name
-    ports: List[Ident]  # Port List. FIXME: should this be part of our `Scope`? 
-    scope: "Scope" # Internal definitions 
+    ports: List[Ident]  # Port List. FIXME: should this be part of our `Scope`?
+    scope: "Scope"  # Internal definitions
 
 
 @datatype
@@ -171,6 +171,7 @@ class ModelType(Enum):
     DIODE = auto()
     RESISTOR = auto()
     CAPACITOR = auto()
+
 
 @datatype
 class ModelVariant:
@@ -207,14 +208,13 @@ class AhdlInclude:
     path: Path
 
 
-
 @datatype
 class LibSection:
     """ Library Section 
     A named section of a library, commonly incorporated with a `UseLib` or similar. """
 
     name: Ident  # Section Name
-    scope: "Scope" # Scoped Definitions 
+    scope: "Scope"  # Scoped Definitions
 
 
 @datatype
@@ -266,11 +266,10 @@ class Unknown:
     txt: str
 
 
-
 @datatype
 class SourceFile:
     path: Path  # Source File Path
-    scope: "Scope" # Scoped Definitions
+    scope: "Scope"  # Scoped Definitions
 
 
 @datatype
@@ -324,10 +323,13 @@ class Call:
     func: Union["FunctionDef", "ExternalRef"]  # Function Name
     args: List["Expr"]  # Arguments List
 
+
 class ArgType(Enum):
     """ Function Argument (and Return) Types Enumeration """
+
     REAL = "real"
     # (that's it for now)
+
 
 @datatype
 class TypedArg:
@@ -414,27 +416,25 @@ class TernOp:
     if_false: Expr  # Value if `cond` is False
 
 
-
-@datatype 
+@datatype
 class Scope:
     """ Hierarchical Scope 
     Collection of named, typed definitions """
 
-    parent: Optional["Scope"] # Parent Scope
-    children: List["Scope"] # Child Scopes
+    parent: Optional["Scope"]  # Parent Scope
+    children: List["Scope"]  # Child Scopes
 
-    # Contents defined in the source of this scope 
-    params: Dict[str, ParamDecl] # Parameters
-    subckt_defs: Dict[str, SubcktDef] # Parameters
-    models: Dict[str, ModelDef] # Model Definitions 
-    model_families: Dict[str, ModelFamily] # Model Family Definitions 
-    functions: Dict[str, FunctionDef] # Function Definitions 
-    subckt_instances: Dict[str, SubcktInstance] # Subcircuit Instances
-    primitive_instances: Dict[str, PrimitiveInstance] # Primitive Instances
+    # Contents defined in the source of this scope
+    params: Dict[str, ParamDecl]  # Parameters
+    subckt_defs: Dict[str, SubcktDef]  # Parameters
+    models: Dict[str, ModelDef]  # Model Definitions
+    model_families: Dict[str, ModelFamily]  # Model Family Definitions
+    functions: Dict[str, FunctionDef]  # Function Definitions
+    subckt_instances: Dict[str, SubcktInstance]  # Subcircuit Instances
+    primitive_instances: Dict[str, PrimitiveInstance]  # Primitive Instances
 
     # Unidentified references to identifiers, and valid types which would fulfill them
-    external: Dict[str, ExternalRef] 
-
+    external: Dict[str, ExternalRef]
 
 
 # Update all the forward type-references
@@ -448,4 +448,3 @@ __all__ = [tp.__name__ for tp in datatypes] + [
     "UnaryOperator",
     "Expr",
 ]
-

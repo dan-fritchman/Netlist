@@ -398,4 +398,3 @@ class HierarchyCollector:
                 self.fail(msg)  # invalid type
 
         return Library(name=start.name, sections=sections)
-

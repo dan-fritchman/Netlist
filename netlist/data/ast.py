@@ -18,7 +18,7 @@ from typing import Optional, Union, List, Tuple
 # PyPi Imports
 from pydantic.dataclasses import dataclass
 
-# Local Imports 
+# Local Imports
 from .shared import SourceInfo
 
 # Keep a list of datatypes defined here,
@@ -472,4 +472,3 @@ __all__ = [tp.__name__ for tp in datatypes] + [
     "Entry",
     "Statement",
 ]
-

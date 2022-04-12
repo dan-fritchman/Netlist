@@ -59,4 +59,3 @@ class SourceInfo:
 
     line: int  # Source-File Line Number
     dialect: "NetlistDialects"  # Netlist Dialect
-

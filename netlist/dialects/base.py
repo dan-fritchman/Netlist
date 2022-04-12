@@ -538,4 +538,3 @@ def _endargs_startkwargs(s):
     a b c EOF => EOF
     """
     return s.nxt is None or s.nxt.tp == Tokens.NEWLINE or s.nxt.tp == Tokens.EQUALS
-

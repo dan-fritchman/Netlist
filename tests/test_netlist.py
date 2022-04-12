@@ -486,4 +486,3 @@ def test_write2():
         ]
     )
     netlist(src=src, dest=StringIO())
-

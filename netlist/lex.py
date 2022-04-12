@@ -178,4 +178,3 @@ class Lexer:
             self.lexed_nonwhite_on_this_line = True
             yield token
             token = self.nxt()
-

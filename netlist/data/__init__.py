@@ -3,7 +3,7 @@
 
 """
 
-from .shared import * 
-from .ast import * 
+from .shared import *
+from .ast import *
 
-from . import ast, cst 
+from . import ast, cst

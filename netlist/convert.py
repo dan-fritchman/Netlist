@@ -20,8 +20,9 @@ from .data import NetlistDialects, Program
 @dataclass
 class ConversionIO:
     """ Input and Output Datatype for Nelist-Format Conversion. """
+
     path: Path
-    base_dir: Path 
+    base_dir: Path
     dialect: Optional[NetlistDialects]
 
 
@@ -47,10 +48,12 @@ def convert(src: ConversionIO, dest: ConversionIO) -> None:
         sourcefile = parser.parse_one()
 
         if src.base_dir not in sourcefile.path.parents:
-            raise TabError 
+            raise TabError
 
-        # 
-        dest_path = Path(str(sourcefile.path).replace(str(src.base_dir), str(dest.base_dir)))
+        #
+        dest_path = Path(
+            str(sourcefile.path).replace(str(src.base_dir), str(dest.base_dir))
+        )
         if not dest_path.parent.exists():
             os.makedirs(dest_path.parent)
 
@@ -63,4 +66,3 @@ def convert(src: ConversionIO, dest: ConversionIO) -> None:
         print(f"Converted {sourcefile.path} to {dest_path}")
 
     ...
-

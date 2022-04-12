@@ -28,6 +28,13 @@ setup(
     python_requires=">=3.8, <4",
     install_requires=["pydantic==1.8.2",],
     extras_require={
-        "dev": ["pytest==5.2", "coverage", "pytest-cov", "black==19.10b0", "twine"]
+        "dev": [
+            "pytest==5.2",
+            "coverage",
+            "pytest-cov",
+            "black==19.10b0",
+            "click==8.0.1",  # This is transitive on `black`, but required for the CLI to work
+            "twine",
+        ]
     },
 )

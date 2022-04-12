@@ -528,4 +528,3 @@ class Netlister:
     def enum(self):
         """ Get our entry in the `NetlistFormat` enumeration """
         raise NotImplementedError
-

@@ -129,4 +129,3 @@ class NgSpiceDialectParser(SpiceDialectParser):
 class HspiceDialectParser(SpiceDialectParser):
     # FIXME: actually specialize!
     enum = NetlistDialects.HSPICE
-
