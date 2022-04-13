@@ -8,15 +8,16 @@ This includes scope-based name resolution, parameter-value resolution, and the l
 """
 
 # Std-Lib Imports
+from dataclasses import field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Optional, Union, List, Tuple, Dict
+from typing import Optional, Union, List, Tuple, Dict, Any
 
 # PyPi Imports
 from pydantic.dataclasses import dataclass
 
 # Local Imports
-from .shared import SourceInfo
+from .shared import SourceInfo, Ident, Int, Float, MetricNum, UnaryOperator, BinaryOperator
 
 # Keep a list of datatypes defined here,
 # primarily so that we can update their forward-references at the end of this module.
@@ -39,13 +40,6 @@ def datatype(cls: type) -> type:
     # And add it to the list of datatypes
     datatypes.append(cls)
     return cls
-
-
-@datatype
-class Ident:
-    """ Identifier """
-
-    name: str
 
 
 @datatype
@@ -286,27 +280,6 @@ class Program:
 
 
 @datatype
-class Int:
-    """ Integer Number """
-
-    val: int
-
-
-@datatype
-class Float:
-    """ Floating Point Number """
-
-    val: float
-
-
-@datatype
-class MetricNum:
-    """ Number with Metric Suffix """
-
-    val: str  # No conversion, just stored as string for now
-
-
-@datatype
 class Call:
     """ 
     Function Call Node 
@@ -364,15 +337,13 @@ class FunctionDef:
 # Expression Union
 # Everything which can be used as a mathematical expression,
 # and ultimately resolves to a scalar value at runtime.
-Expr = Union["UnaryOp", "BinaryOp", "TernOp", Int, Float, MetricNum, Ident, Call]
-
-
-class UnaryOperator(Enum):
-    """ Enumerated, Supported Unary Operators 
-    Values generally equal their string-format equivalents. """
-
-    PLUS = "+"
-    NEG = "-"
+#
+# CST Expressions differ from their AST counterparts primarily by the inclusion of `ExternalRef`
+# and the exclusion of `Ident`.
+#
+Expr = Union[
+    "UnaryOp", "BinaryOp", "TernOp", Int, Float, MetricNum, Call, "ExternalRef"
+]
 
 
 @datatype
@@ -381,21 +352,6 @@ class UnaryOp:
 
     tp: UnaryOperator  # Operator Type
     targ: Expr  # Target Expression
-
-
-class BinaryOperator(Enum):
-    """ Enumerated, Supported Binary Operators 
-    Values generally equal their string-format equivalents. """
-
-    ADD = "+"
-    SUB = "-"
-    MUL = "*"
-    DIV = "/"
-    POW = "^"  # Note there is some divergence between caret and double-star here.
-    GT = ">"
-    LT = "<"
-    GE = ">="
-    LE = "<="
 
 
 @datatype
@@ -422,19 +378,30 @@ class Scope:
     Collection of named, typed definitions """
 
     parent: Optional["Scope"]  # Parent Scope
-    children: List["Scope"]  # Child Scopes
+    children: List["Scope"] = field(default_factory=list)  # Child Scopes
 
     # Contents defined in the source of this scope
-    params: Dict[str, ParamDecl]  # Parameters
-    subckt_defs: Dict[str, SubcktDef]  # Parameters
-    models: Dict[str, ModelDef]  # Model Definitions
-    model_families: Dict[str, ModelFamily]  # Model Family Definitions
-    functions: Dict[str, FunctionDef]  # Function Definitions
-    subckt_instances: Dict[str, SubcktInstance]  # Subcircuit Instances
-    primitive_instances: Dict[str, PrimitiveInstance]  # Primitive Instances
+    params: Dict[str, ParamDecl] = field(default_factory=dict)  # Parameters
+    subckt_defs: Dict[str, SubcktDef] = field(default_factory=dict)  # Parameters
+    models: Dict[str, ModelDef] = field(default_factory=dict)  # Model Definitions
+    model_families: Dict[str, ModelFamily] = field(
+        default_factory=dict
+    )  # Model Family Definitions
+    functions: Dict[str, FunctionDef] = field(
+        default_factory=dict
+    )  # Function Definitions
+    subckt_instances: Dict[str, SubcktInstance] = field(
+        default_factory=dict
+    )  # Subcircuit Instances
+    primitive_instances: Dict[str, PrimitiveInstance] = field(
+        default_factory=dict
+    )  # Primitive Instances
 
     # Unidentified references to identifiers, and valid types which would fulfill them
-    external: Dict[str, ExternalRef]
+    external: Dict[str, ExternalRef] = field(default_factory=dict)
+
+    # Other unnamed attributes such as `Option`s
+    other: List[Any] = field(default_factory=list)  # FIXME: update type
 
 
 # Update all the forward type-references
@@ -444,6 +411,10 @@ for tp in datatypes:
 # And solely export the defined datatypes
 # (at least with star-imports, which are hard to avoid using with all these types)
 __all__ = [tp.__name__ for tp in datatypes] + [
+    "Int",
+    "Float",
+    "MetricNum",
+    "Ident",
     "BinaryOperator",
     "UnaryOperator",
     "Expr",

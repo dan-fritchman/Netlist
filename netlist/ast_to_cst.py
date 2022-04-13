@@ -5,7 +5,7 @@
 # Std-Lib Imports
 from enum import Enum, auto
 from pathlib import Path
-from typing import Optional, Union, List, Dict, Generic, TypeVar, Sequence
+from typing import Optional, Union, List, Dict, Generic, TypeVar, Sequence, Tuple, Any
 from dataclasses import field
 
 # PyPi Imports
@@ -19,6 +19,33 @@ from .data import ast, cst
 def ast_to_cst(ast: ast.Program) -> cst.Program:
     """ Perform all the necessary resolution to convert an `ast.Program` to a `cst.Program`. """
     return Converter(ast).convert()
+
+
+class ScopeType(Enum):
+    """ Enumerated Scope-Types 
+    Serves as an annotation for each nested scope. """
+
+    FILE = auto()
+    LIB_SECTION = auto()
+    SUBCKT_DEF = auto()
+
+
+CURRENT_SCOPE_ID = 0
+
+
+@dataclass
+class ScopeId:
+    """ Integer scope identifier. 
+    Incremented with each call to `next`. """
+
+    num: int
+
+    @classmethod
+    def next(cls) -> "ScopeId":
+        global CURRENT_SCOPE_ID
+        rv = ScopeId(CURRENT_SCOPE_ID)
+        CURRENT_SCOPE_ID += 1
+        return rv
 
 
 DataT = TypeVar("DataT")
@@ -77,6 +104,9 @@ class AstScope:
     
     Note all fields refer to `ast.*` datatypes. """
 
+    sid: ScopeId  # Scope ID Number
+    stype: ScopeType  # Enumerated Scope-Type
+
     parent: Optional["AstScope"]  # Parent Scope. Our one required parameter.
     children: List["AstScope"] = field(default_factory=list)  # Child Scopes
 
@@ -86,7 +116,7 @@ class AstScope:
     # Subcircuit Definitions
     subckts: NoRedefDict[ast.SubcktDef] = field(default_factory=NoRedefDict.new)
     # Model Definitions
-    models: NoRedefDict[Union[ast.ModelDef, ast.ModelFamily, ast.ModelVariant]] = field(
+    models: NoRedefDict[Union[ast.ModelDef, ast.ModelFamily]] = field(
         default_factory=NoRedefDict.new
     )
     # Function Definitions
@@ -104,13 +134,13 @@ class AstScope:
 
     @classmethod
     def root(cls) -> "AstScope":
-        """ Create a root scope """
-        return AstScope(parent=None)
+        """ Create a root file scope """
+        return AstScope(parent=None, stype=ScopeType.FILE, sid=ScopeId.next())
 
-    def child(self) -> "AstScope":
+    def child(self, stype: ScopeType) -> "AstScope":
         """ Create a new and initially empty child scope. 
         Add it to our `children` list along the way. """
-        child_scope = AstScope(parent=self)
+        child_scope = AstScope(parent=self, stype=stype, sid=ScopeId.next())
         self.children.append(child_scope)
         return child_scope
 
@@ -128,11 +158,12 @@ class AstScope:
         self.others.extend(other.sections)
 
 
+@dataclass
 class MergedScope:
     """ A marker for files that are collected, 
     but into another file's scope instead of one of their own. """
 
-    ...  # (empty)
+    sid: ScopeId
 
 
 class Converter:
@@ -170,9 +201,9 @@ class Converter:
         """ Collect an `ast.SourceFile` into the current AST scope. """
         self.collect_entries(file.contents)
 
-    def push_scope(self):
+    def push_scope(self, stype: ScopeType):
         """ Push a new child scope onto our "stack" of them. """
-        self.ast_scope = self.ast_scope.child()
+        self.ast_scope = self.ast_scope.child(stype)
 
     def pop_scope(self) -> AstScope:
         """ Pop up a level of scope-stack, returning the popped element. 
@@ -244,7 +275,7 @@ class Converter:
                     if isinstance(scope_to_merge, MergedScope):
                         # We've doubly included this file somewhere. Error time.
                         raise TabError  # FIXME! a slightly better error.
-                    self.ast_file_scopes[path] = MergedScope()
+                    self.ast_file_scopes[path] = MergedScope(scope_to_merge.sid)
                 elif isinstance(entry, ast.UseLib):
                     scope_to_merge = file_scope.section_scopes[entry.section.name]
 
@@ -280,3 +311,82 @@ class Converter:
         # Now that `entries` are done, check and add any newly created model-families
         for family in new_model_families:
             self.ast_scope.models.set(family.name.name, family)
+
+
+RT = cst.RefType  # Add a shorthand
+
+
+class Resolver:
+    """ Resolve all references in AST scopes """
+
+    def __init__(self, ast_scopes: List[Union[AstScope, MergedScope]]):
+        self.ast_scopes = {s.sid: s for s in ast_scopes}
+        self.ast_scope = None
+        self.cst_scopes = dict()
+        self.cst = None
+
+    def resolve(self) -> None:
+        """ Resolve all of our AST scopes into our CST. """
+        for ast_scope in self.ast_scopes.values():
+            if ast_scope.sid in self.cst_scopes:
+                continue 
+            if isinstance(ast_scope, MergedScope):
+                continue 
+            self.cst_scopes[ast_scope.sid] = Something() # FIXME! 
+            self.ast_scope = ast_scope
+            self.resolve_scope()
+
+    def resolve_scope(
+        self, ast_scope: AstScope
+    ) -> Union[cst.SourceFile, cst.LibSection, cst.SubcktDef]:
+        """ Resolve a single AST scope to a CST type. """
+        # First resolve all top-level items
+        raise NotImplementedError
+
+        # Then resolve all references in child scopes
+        for child in ast_scope.children:
+            child_obj = self.resolve_scope(child)
+            # FIXME: sort out what to add, based on type
+
+    def resolve_instance(
+        self, inst: ast.Instance
+    ) -> Union[cst.SubcktInstance, cst.PrimitiveInstance]:
+        """ Resolve an AST Instance to a CST one, particularly resolving its target Subckt or Primitive and parameter values. 
+        Note that AST instances *can* be turned into primitives. 
+        This is particularly common when parsing Spectre format, for which primitives look more like a
+        standard library of subcircuits. The AST level does not differentiated between the two. """
+        target = self.search(key=inst.module.name, types=[RT.SUBCKT])
+        if isinstance(target, ast.SubcktDef):
+            # where do we get get cst subckt now...
+            ...
+
+    def search(self, key: str, types: Sequence[RT]) -> Tuple[ScopeId, Any]:
+        """ Hierarchically search AST scopes for `key`, starting from the current scope. """
+        ast_scope = self.ast_scope
+        while True:
+            if ast_scope is None:
+                # Not found. Create an `ExternalRef`.
+                return cst.ExternalRef(Ident(key), valid_types=types)
+            dicts = ast_dicts(ast_scope, types)
+            for d in dicts:
+                something = d.get(key, None)
+                if something is not None:
+                    return (ast_scope.sid, something)
+
+            ast_scope = ast_scope.parent
+
+
+def ast_dicts(scope: AstScope, types: Sequence[RT]) -> List[NoRedefDict]:
+    """ Get the dictionaries corresponding to `types` in `ast_scope` """
+
+    dicts = {
+        RT.SUBCKT: scope.subckts,
+        RT.FUNCTION: scope.functions,
+        RT.MODEL: scope.models,
+        RT.PARAM: scope.params,
+    }
+    if any(tp not in dicts for tp in types):
+        raise ValueError
+
+    return [dicts[tp] for tp in types]
+

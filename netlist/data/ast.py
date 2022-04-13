@@ -19,11 +19,11 @@ from typing import Optional, Union, List, Tuple
 from pydantic.dataclasses import dataclass
 
 # Local Imports
-from .shared import SourceInfo
+from .shared import SourceInfo, Ident, Int, Float, MetricNum, UnaryOperator, BinaryOperator
 
 # Keep a list of datatypes defined here,
 # primarily so that we can update their forward-references at the end of this module.
-datatypes = [SourceInfo]
+datatypes = []
 
 
 def datatype(cls: type) -> type:
@@ -426,20 +426,6 @@ class UnaryOp:
     targ: Expr  # Target Expression
 
 
-class BinaryOperator(Enum):
-    """ Enumerated, Supported Binary Operators 
-    Values generally equal their string-format equivalents. """
-
-    ADD = "+"
-    SUB = "-"
-    MUL = "*"
-    DIV = "/"
-    POW = "^"  # Note there is some divergence between caret and double-star here.
-    GT = ">"
-    LT = "<"
-    GE = ">="
-    LE = "<="
-
 
 @datatype
 class BinaryOp:
@@ -466,6 +452,10 @@ for tp in datatypes:
 # And solely export the defined datatypes
 # (at least with star-imports, which are hard to avoid using with all these types)
 __all__ = [tp.__name__ for tp in datatypes] + [
+    "Int",
+    "Float",
+    "MetricNum",
+    "Ident",
     "BinaryOperator",
     "UnaryOperator",
     "Expr",
