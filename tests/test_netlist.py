@@ -25,7 +25,7 @@ def test_spice_exprs():
     def parse_expression(s: str) -> SpiceDialectParser:
         """ Parse a string expression, including placing the parser in EXPR mode first, 
         particularly so that elements like "*" are interpreted as multiplication. """
-        from netlist.dialects.base import ParserState
+        from netlist.parse.dialects.base import ParserState
 
         parser = SpiceDialectParser.from_str(s)
         parser.state = ParserState.EXPR
@@ -51,7 +51,7 @@ def test_spectre_exprs():
 
     def parse_expression(s: str) -> SpectreDialectParser:
         """ Parse a string expression """
-        from netlist.dialects.base import ParserState
+        from netlist.parse.dialects.base import ParserState
 
         parser = SpectreDialectParser.from_str(s)
         parser.state = ParserState.EXPR

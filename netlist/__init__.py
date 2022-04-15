@@ -8,9 +8,10 @@ __version__ = "0.1.0"
 
 
 from .data import *
-from .dialects import *
-from .parse import *
+
 from .write import *
 from .convert import *
 
-from .ast_to_cst import *
+from .parse import *
+from .parse.dialects import *
+from .parse.ast_to_cst import *

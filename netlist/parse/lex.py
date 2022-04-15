@@ -10,7 +10,7 @@ from typing import Iterable, Optional
 from pydantic.dataclasses import dataclass
 
 # Local Imports
-from .data import *
+from ..data import *
 
 
 # Numeric-value suffixes

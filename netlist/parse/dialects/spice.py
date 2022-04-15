@@ -4,7 +4,7 @@
 from typing import Optional, Union
 
 # Local Imports
-from ..data import *
+from ...data import *
 from .base import DialectParser, Tokens
 
 

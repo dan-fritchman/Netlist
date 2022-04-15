@@ -13,7 +13,7 @@ from pydantic.dataclasses import dataclass
 from pydantic.generics import GenericModel
 
 # Local Imports
-from .data import ast, cst
+from ..data import ast, cst
 
 
 def ast_to_cst(ast: ast.Program) -> cst.Program:

@@ -10,8 +10,9 @@ from typing import List, Tuple, Optional, Sequence, Union, Set, get_args
 from pydantic.dataclasses import dataclass
 
 # Local Imports
+from . import dialects 
 from .dialects import DialectParser, NetlistParseError
-from .data import *
+from ..data import *
 
 
 class ErrorMode(Enum):
