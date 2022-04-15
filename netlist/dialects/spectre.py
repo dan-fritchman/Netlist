@@ -81,14 +81,19 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
             Tokens.ENDSECTION: self.parse_end_section,
             Tokens.INCLUDE: self.parse_include,
             Tokens.REAL: self.parse_function_def,
+            Tokens.PROT: self.parse_protect,
+            Tokens.PROTECT: self.parse_protect,
+            Tokens.UNPROT: self.parse_unprotect,
+            Tokens.UNPROTECT: self.parse_unprotect,
             Tokens.IDENT: self.parse_named,  # Catch-all for any non-keyword identifier
         }
-        for tok, func in rules.items():
-            if pk.tp == tok:
-                return func()
-
-        # No match - error time.
-        self.fail()
+        pk = self.peek()
+        if pk.tp not in rules:
+            # No match - error time.
+            return self.fail(f"Unexpected token to begin statement: {pk}")
+        # Call the type-specific parsing function
+        type_parser = rules[pk.tp]
+        return type_parser()
 
     def parse_named(self):
         """ Parse an identifier-named statement. 
@@ -111,10 +116,8 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
     def parse_model(self) -> Union[ModelDef, ModelFamily]:
         """ Parse a Model statement """
         self.expect(Tokens.MODEL)
-        self.expect(Tokens.IDENT)
-        mname = Ident(self.cur.val)
-        self.expect(Tokens.IDENT)
-        mtype = Ident(self.cur.val)
+        mname = self.parse_ident()
+        mtype = self.parse_ident()
         if self.match(Tokens.LBRACKET):
             self.expect(Tokens.NEWLINE)
             # Multi-Variant Model Family
@@ -270,7 +273,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
         self.expect(Tokens.OPTIONS)
-        vals = self.parse_param_values()
+        vals = self.parse_option_values()
         return Options(name=name, vals=vals)
 
     def parse_include(self) -> Union[Include, UseLib]:

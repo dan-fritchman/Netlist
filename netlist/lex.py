@@ -32,6 +32,13 @@ suffixes = dict(
 # (Python `re` complains about inserting this as an inline flag.)
 suffix_pattern = "|".join(list(suffixes.keys()) + [k.lower() for k in suffixes.keys()])
 
+# Pattern for a string identifier
+# An initial alpha character, followed by any number of chars, numbers, and underscores.
+# Note some Spice "identifiers" - particularly nets - are often numerically-valued.
+# "Node zero" is a prominent example.
+# Those are not covered here.
+ident_pattern = r"[A-Za-z_][A-Za-z0-9_]*"
+
 # Master mapping of tokens <=> patterns
 _patterns1 = dict(
     DUBSLASH=r"\/\/",
@@ -58,7 +65,7 @@ _patterns1 = dict(
     DOLLAR=r"\$",
     QUESTION=r"\?",
     DUBQUOTE=r"\"",  # Double-quote. Surrounds file-paths, and in some cases, expressions.
-    MODEL_VARIANT=r"[A-Za-z_][A-Za-z0-9_]*\.\d+",  # nmos.0, mymodel.3, etc
+    MODEL_VARIANT=rf"{ident_pattern}\.(\d|{ident_pattern})+",  # nmos.0, mymodel.global, etc
     METRIC_NUM=rf"(\d+(\.\d+)?|\.\d+)({suffix_pattern})",  # 1M or 1.0f or .1k
     FLOAT=r"(\d+[eE][+-]?\d+|(\d+\.\d*|\.\d+)([eE][+-]?\d+)?)",  # 1e3 or 1.0 or .1 (optional e-3)
     INT=r"\d+",
@@ -70,27 +77,32 @@ _keywords = dict(
     ENDSECTION=r"endsection",
     SECTION=r"section",
     AHDL=r"ahdl_include",
-    INCLUDE=r"include",
-    INC=r"inc",
+    INCLUDE=r"(include|INCLUDE)",
+    INC=r"(inc|INC)",
     INLINE=r"inline",
-    SUBCKT=r"subckt",
-    ENDS=r"ends",
+    SUBCKT=r"(subckt|SUBCKT)",
+    ENDS=r"(ends|ENDS)",
     LIBRARY=r"library",
-    LIB=r"lib",
-    ENDL=r"endl",
-    MODEL=r"model",
+    LIB=r"(lib|LIB)",
+    ENDL=r"(endl|ENDL)",
+    MODEL=r"(model|MODEL)",
     STATS=r"statistics",
     SIMULATOR=r"simulator",
     LANG=r"lang",
     PARAMETERS=r"parameters",
-    PARAM=r"param|PARAM",
-    OPTIONS=r"options|OPTIONS",
-    OPTION=r"option|OPTION",
+    PARAM=r"(param|PARAM)",
+    OPTIONS=r"(options|OPTIONS)",
+    OPTION=r"(option|OPTION)",
     REAL=r"real",
     RETURN=r"return",
     DEV_GAUSS=r"dev\/gauss",  # Perhaps there are more "dev/{x}" to be added; gauss is the known one for now.
+    # Note the order of these `protect` tokens is important, as `prot` is a subset of all of them! It must come last and lowest priority.
+    UNPROTECT=r"(unprotect|UNPROTECT)",
+    UNPROT=r"(unprot|UNPROT)",
+    PROTECT=r"(protect|PROTECT)",
+    PROT=r"(prot|PROT)",
 )
-_patterns2 = dict(IDENT=r"[A-Za-z_][A-Za-z0-9_]*", ERROR=r"[\s\S]",)
+_patterns2 = dict(IDENT=ident_pattern, ERROR=r"[\s\S]",)
 # Given each token its name as a key in the overall regex
 tokens = {key: rf"(?P<{key}>{val})" for key, val in _patterns1.items()}
 for key, val in _keywords.items():
@@ -110,8 +122,8 @@ class Token:
     """ Lexer Token 
     Includes type-annotation (as a string), and the token's text value. """
 
-    tp: str
-    val: str
+    tp: str  # Type Annotation. A value from `Tokens`, which should be enumerated, some day.
+    val: str  # Text Content Value
 
 
 class Lexer:

@@ -1,5 +1,6 @@
 
 # Local files 
+scratch 
 *.json
 .vscode/settings.json 
 tests/test_site.py

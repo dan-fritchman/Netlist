@@ -5,20 +5,12 @@ Core types used by several layers of netlist representations
 """
 
 # Std-Lib Imports
-from enum import Enum
-from typing import Union
+from enum import Enum, auto
+from pathlib import Path
+from typing import Optional, Union, Dict, Generic, TypeVar, Sequence, Tuple, Any, List 
 
 # PyPi Imports
 from pydantic.dataclasses import dataclass
-
-
-class NetlistParseError(Exception):
-    """ Netlist Parse Error """
-
-    @staticmethod
-    def throw(*args, **kwargs):
-        """ Exception-raising debug wrapper. Breakpoint to catch `NetlistParseError`s. """
-        raise NetlistParseError(*args, **kwargs)
 
 
 class NetlistDialects(Enum):

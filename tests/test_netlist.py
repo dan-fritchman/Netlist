@@ -456,6 +456,7 @@ def test_write2():
         SourceFile,
         netlist,
         Options,
+        Option,
         ParamVal,
         Ident,
         MetricNum,
@@ -471,11 +472,7 @@ def test_write2():
                     Options(
                         name=None,
                         vals=[
-                            ParamVal(
-                                name=Ident(name="scale", source_info=None),
-                                val=MetricNum(val="1.0u", source_info=None),
-                                source_info=None,
-                            )
+                            Option(name=Ident(name="scale"), val=MetricNum(val="1.0u"),)
                         ],
                         source_info=SourceInfo(
                             line=15, dialect=NetlistDialects.SPECTRE_SPICE
@@ -486,3 +483,94 @@ def test_write2():
         ]
     )
     netlist(src=src, dest=StringIO())
+
+
+def test_protection():
+    """ Test the `protect` / `unprotect` encryption features """
+    from netlist import SpectreDialectParser, SpectreSpiceDialectParser
+    from netlist.data import ast
+
+    txt = ".protect \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == ast.StartProtectedSection()
+
+    txt = ".prot \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == ast.StartProtectedSection()
+
+    txt = ".unprotect \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == ast.EndProtectedSection()
+
+    txt = ".unprot \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == ast.EndProtectedSection()
+
+    txt = "protect \n"
+    p = SpectreDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == ast.StartProtectedSection()
+
+    txt = "prot \n"
+    p = SpectreDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == ast.StartProtectedSection()
+
+    txt = "unprotect \n"
+    p = SpectreDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == ast.EndProtectedSection()
+
+    txt = "unprot \n"
+    p = SpectreDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == ast.EndProtectedSection()
+
+
+def test_names_including_keywords():
+    """ Test parsing objects whose names include keywords, such as `my_favorite_subckt`. """
+    from netlist import SpectreSpiceDialectParser, Ident, ParamDecls, ParamDecl, Int
+
+    txt = ".param my_favorite_model = model_that_works_best \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+
+    assert i == ParamDecls(
+        params=[
+            ParamDecl(
+                name=Ident(name="my_favorite_model"),
+                default=Ident(name="model_that_works_best"),
+                distr=None,
+            )
+        ],
+    )
+
+
+def test_model_with_parens():
+    from netlist import SpectreSpiceDialectParser
+    from netlist.data.ast import ModelDef, Ident, ParamDecl
+
+    txt = ".model mymodel mtype arg1 arg2 arg3 (key1=val1 key2=val2) \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    m = p.parse(p.parse_statement)
+
+    golden = ModelDef(
+        name=Ident(name="mymodel"),
+        mtype=Ident(name="mtype"),
+        args=[Ident(name="arg1"), Ident(name="arg2"), Ident(name="arg3"),],
+        params=[
+            ParamDecl(name=Ident(name="key1"), default=Ident(name="val1"), distr=None,),
+            ParamDecl(name=Ident(name="key2"), default=Ident(name="val2"), distr=None,),
+        ],
+    )
+    assert m == golden
+
+    # Run the same thing without the parens, check we get the same result
+    txt = ".model mymodel mtype arg1 arg2 arg3 key1=val1 key2=val2 \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    m = p.parse(p.parse_statement)
+    assert m == golden

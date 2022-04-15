@@ -4,6 +4,7 @@
 
 # Std-Lib Imports
 from enum import Enum
+from textwrap import dedent
 from typing import Iterable, Any, Optional, List, Union, Tuple
 
 # Local Imports
@@ -153,17 +154,19 @@ class DialectParser:
         """ Assertion that our next token matches one of `tp`, and return the one it was. """
         rv = self.match_any(*tp)
         if rv is None:
-            self.fail()
+            self.fail(f"Invalid token: {self.nxt}, expecting one of {tp}")
         return rv
 
     def parse(self, f=None) -> Any:
-        """ Perform parsing. Succeeds if top-level is parsable by function `f`.
+        """ Perform parsing. 
+        Succeeds if top-level is parsable by function `f`.
         Defaults to parsing `Expr`. """
         self.start()
         func = f if f else self.parse_expr
         self.root = func()
         if self.nxt is not None:  # Check whether there's more stuff
-            self.fail()
+            msg = f"Errant remaining token {self.nxt} found while parsing {self.root} via {func}"
+            self.fail(msg)
         return self.root
 
     def parse_subckt_start(self) -> StartSubckt:
@@ -300,8 +303,7 @@ class DialectParser:
         return self.parse_param_values()
 
     def parse_param_val(self) -> ParamVal:
-        self.expect(Tokens.IDENT)
-        name = Ident(self.cur.val)
+        name = self.parse_ident()
         self.expect(Tokens.EQUALS)
         e = self.parse_expr()
         return ParamVal(name, e)
@@ -314,7 +316,7 @@ class DialectParser:
             _e = self.parse_expr()
         return ParamDecl(val.name, val.val)
 
-    def parse_param_declarations(self) -> List[ParamDecl]:
+    def parse_param_declarations(self) -> List[ast.ParamDecl]:
         """ Parse a set of parameter declarations """
         term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
         MAXN = 100_000
@@ -322,10 +324,26 @@ class DialectParser:
         # defined in a single `.param` statement. Set MAXN to 100k to be safe.
         return self.parse_list(self.parse_param_declaration, term=term, MAXN=MAXN)
 
-    def parse_param_values(self) -> List[ParamVal]:
+    def parse_param_values(self) -> List[ast.ParamVal]:
         """ ( ident = expr )* """
         term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
         return self.parse_list(self.parse_param_val, term=term)
+
+    def parse_option_values(self) -> List[ast.OptionVal]:
+        """ Parse a list of `OptionVal`s, which can be expressions or strings. """
+        term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
+        return self.parse_list(self.parse_option, term=term)
+
+    def parse_option(self) -> ast.Option:
+        """ Parse an `Option` name: `OptionVal` pair """
+        name = self.parse_ident()
+        self.expect(Tokens.EQUALS)
+        if self.peek().tp in (Tokens.TICK, Tokens.DUBQUOTE):
+            txt = self.parse_quote_string()
+            val = ast.QuotedString(txt)
+        else:
+            val = self.parse_expr()
+        return ast.Option(name, val)
 
     def parse_end_sub(self):
         self.expect(Tokens.ENDS)
@@ -474,8 +492,7 @@ class DialectParser:
     def fail(self, *args, **kwargs) -> None:
         """ Failure Debug Helper. 
         Primarily designed to capture state, and potentially break-points, when things go wrong. """
-        print(self)
-        NetlistParseError.throw(*args, **kwargs)
+        NetlistParseError(self, *args, **kwargs).throw()
 
     def is_expression_starter(self, tp: Tokens) -> Optional[Tuple[Tokens, Tokens]]:
         """ Indicates whether token-type `tp` is a valid expression-*starting* Token-type. 
@@ -512,6 +529,16 @@ class DialectParser:
         self.expect(pair[1])
         return e
 
+    def parse_protect(self) -> ast.StartProtectedSection:
+        self.expect_any(Tokens.PROT, Tokens.PROTECT)
+        self.expect(Tokens.NEWLINE)
+        return ast.StartProtectedSection()
+
+    def parse_unprotect(self) -> ast.EndProtectedSection:
+        self.expect_any(Tokens.UNPROT, Tokens.UNPROTECT)
+        self.expect(Tokens.NEWLINE)
+        return ast.EndProtectedSection()
+
     """ Abstract Methods """
 
     def are_stars_comments_now(self) -> bool:
@@ -536,5 +563,33 @@ def _endargs_startkwargs(s):
     a b c d=1 e=2 ... => d
     a b c \n  => \n
     a b c EOF => EOF
+    a b c (d=1 e=2) ... => (
     """
-    return s.nxt is None or s.nxt.tp == Tokens.NEWLINE or s.nxt.tp == Tokens.EQUALS
+    return (
+        s.nxt is None
+        or s.nxt.tp == Tokens.NEWLINE
+        or s.nxt.tp == Tokens.EQUALS
+        or s.nxt.tp == Tokens.LPAREN
+    )
+
+
+class NetlistParseError(Exception):
+    """ Netlist Parse Error """
+
+    def __init__(self, parser: DialectParser, msg: Optional[str] = None):
+        super_msg = dedent(
+            f"""
+            NetlistParseError(
+                msg={msg},
+                path={None if not parser.parent else parser.parent.path},
+                dialect={parser.enum.value},
+                line=\"{parser.lex.line.strip()}\",
+                linenum={parser.lex.line_num},
+            )"""
+        )
+        super().__init__(super_msg)
+
+    def throw(self):
+        """ Exception-raising debug wrapper. Breakpoint to catch `NetlistParseError`s. """
+        raise self
+

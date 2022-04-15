@@ -313,6 +313,7 @@ class SpiceNetlister(Netlister):
         self.write(".option \n")
         for option in options.vals:
             self.write("+ ")
+            # FIXME: add the cases included in `OptionVal` but not `ParamVal`, notably quoted string-paths 
             self.write_param_val(option)
             self.write(" \n")
         self.write("\n")
@@ -513,6 +514,7 @@ class XyceNetlister(SpiceNetlister):
             self.write(f".options {category_name} \n")
             for option in category_list:
                 self.write("+ ")
+                # FIXME: add the cases included in `OptionVal` but not `ParamVal`, notably quoted string-paths 
                 self.write_param_val(option)
                 self.write(" \n")
             self.write("\n")

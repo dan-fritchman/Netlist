@@ -6,19 +6,19 @@ import os, copy, codecs
 from enum import Enum
 from pathlib import Path
 from warnings import warn
-from typing import List, Tuple, Optional, Sequence, Union, Set
+from typing import List, Tuple, Optional, Sequence, Union, Set, get_args
 from pydantic.dataclasses import dataclass
 
 # Local Imports
-from .dialects import DialectParser
+from .dialects import DialectParser, NetlistParseError
 from .data import *
 
 
 class ErrorMode(Enum):
     """ Enumerated Error-Response Strategies """
 
-    RAISE = 0  # Raise any generated exceptions
-    STORE = 1  # Store error-generating content in `Unknown` elements
+    RAISE = "raise"  # Raise any generated exceptions
+    STORE = "store"  # Store error-generating content in `Unknown` elements
 
 
 @dataclass
@@ -256,11 +256,9 @@ class HierarchyCollector:
     """
 
     def __init__(self, stmts: List[Statement]):
+        # Statements are stored in an iterator, which maintains a single state/ index.
+        # So all these nested `collect_*` calls `for` loops are incrementing the same index through it.
         self.stmts = iter(stmts)
-
-    def nxt(self) -> Optional[Statement]:
-        """ Get our next `Statement`, or `None` if exhausted """
-        return next(self.stmts, None)
 
     def collect_source_file(self) -> List[Entry]:
         """ Primary Entry Point. 
@@ -270,17 +268,17 @@ class HierarchyCollector:
         nodes = []
         params = []  # Collect parameter-declarations into one
 
-        while True:
-            stmt = self.nxt()
-            if stmt is None:
-                break  # library-end on file-end
+        for stmt in self.stmts:
 
-            if isinstance(stmt, StartSubckt):
+            # Check for structured types, and if we find one, delegate to its collection-function
+            if isinstance(stmt, ast.StartSubckt):
                 s = self.collect_subckt(start=stmt)
-            elif isinstance(stmt, StartLib):
+            elif isinstance(stmt, ast.StartLib):
                 s = self.collect_lib(start=stmt)
-            elif isinstance(stmt, StartLibSection):
+            elif isinstance(stmt, ast.StartLibSection):
                 s = self.collect_lib_section(start=stmt)
+            elif isinstance(stmt, ast.StartProtectedSection):
+                s = self.collect_protected_section(start=stmt)
 
             # Append any parameter-declarations to our running list
             elif isinstance(stmt, ParamDecl):
@@ -292,109 +290,190 @@ class HierarchyCollector:
 
             else:  # Everything else, copy along
                 s = stmt
+
+            if not isinstance(s, get_args(ast.Entry)):
+                raise TypeError(str(s))
             nodes.append(s)
 
         if params:
             # If we found any parameters, stick them at the beginning of the nodes-list.
-            # This tends to be the most interprable for eventual netlist formats.
+            # This tends to be the most interpretable for eventual netlist formats.
             nodes = [ParamDecls(params)] + nodes
 
         return nodes
 
-    def collect_subckt(self, start: StartSubckt) -> SubcktDef:
+    def collect_subckt(self, start: ast.StartSubckt) -> ast.SubcktDef:
         """ Collect a sub-circuit definition """
 
         nodes = []
         params = copy.copy(start.params)
+        end: Optional[ast.EndSubckt] = None
 
-        while True:
-            stmt = self.nxt()
-            if stmt is None:
-                break  # library-end on file-end
+        for stmt in self.stmts:
 
-            if isinstance(stmt, EndSubckt):
+            if isinstance(stmt, ast.EndSubckt):
+                end = stmt
                 break  # done with this module
 
             # Parameter statements in subckt scope are "promoted" to be subckt/module-parameters.
             # We do so by appending them to any existing `start` parameters,
             # and by *not* repeating the param-declarations in the resultant AST tree.
-            if isinstance(stmt, ParamDecl):
+            elif isinstance(stmt, ast.ParamDecl):
                 params.append(stmt)
                 continue
-            elif isinstance(stmt, ParamDecls):
+            elif isinstance(stmt, ast.ParamDecls):
                 params.extend(stmt.params)
                 continue
 
-            if isinstance(stmt, StartSubckt):
+            elif isinstance(stmt, ast.StartSubckt):
                 # Collect nested sub-circuit definitions
                 s = self.collect_subckt(start=stmt)
+
+            elif isinstance(
+                stmt, (ast.StartLib, ast.StartLibSection, ast.StartProtectedSection)
+            ):
+                # Other structured types are not allowed here.
+                self.fail()
+
             else:  # Anything else, copy along
                 s = stmt
+
+            if not isinstance(s, get_args(ast.Entry)):
+                raise TypeError(str(s))
             nodes.append(s)
 
-        return SubcktDef(
+        if end is None:
+            msg = f"SubcktDef lacking EndSubckt: {start}"
+            self.fail(msg)
+
+        return ast.SubcktDef(
             name=start.name, ports=start.ports, params=params, entries=nodes
         )
 
-    def collect_lib_section(self, start: StartLibSection) -> LibSection:
+    def collect_lib_section(self, start: ast.StartLibSection) -> ast.LibSection:
         """ Collect a library section """
 
         nodes = []
         params = []  # Collect parameter-declarations into one
+        end: Optional[ast.EndLibSection] = None
 
-        while True:
-            stmt = self.nxt()
-            if stmt is None:
-                break  # library-end on file-end
+        for stmt in self.stmts:
 
-            if isinstance(stmt, EndLibSection):
+            if isinstance(stmt, ast.EndLibSection):
+                end = stmt
                 break  # done with this section
-            elif isinstance(stmt, StartLibSection):
+
+            elif isinstance(stmt, (ast.StartLib, ast.StartLibSection)):
                 self.fail()  # these don't nest; something's wrong
-            elif isinstance(stmt, StartSubckt):
+
+            elif isinstance(stmt, ast.StartSubckt):
                 s = self.collect_subckt(start=stmt)
 
+            elif isinstance(stmt, ast.StartProtectedSection):
+                s = self.collect_protected_section(start=stmt)
+
             # Append any parameter-declarations to our running list
-            elif isinstance(stmt, ParamDecl):
+            elif isinstance(stmt, ast.ParamDecl):
                 params.append(stmt)
                 continue
-            elif isinstance(stmt, ParamDecls):
+            elif isinstance(stmt, ast.ParamDecls):
                 params.extend(stmt.params)
                 continue
 
             else:  # Anything else, copy along
                 s = stmt
+
+            if not isinstance(s, get_args(ast.Entry)):
+                raise TypeError(str(s))
             nodes.append(s)
+
+        # FIXME: not finding an `end` implies we reached end-of-input. Is that a valid or errant case? Error for now.
+        if end is None:
+            msg = f"LibrarySection lacking ending delimiter: {start}"
+            self.fail(msg)
 
         if params:
             # If we found any parameters, stick them at the beginning of the nodes-list.
-            # This tends to be the most interprable for eventual netlist formats.
-            nodes = [ParamDecls(params)] + nodes
+            # This tends to be the most interpretable for eventual netlist formats.
+            nodes = [ast.ParamDecls(params)] + nodes
 
-        return LibSection(name=start.name, entries=nodes)
+        return ast.LibSection(name=start.name, entries=nodes)
 
-    def collect_lib(self, start: StartLib) -> Library:
+    def collect_lib(self, start: ast.StartLib) -> ast.Library:
         """ Collect a library definition """
 
-        # FIXME: is this really a thing? Or are we always collecting a `LibSection` at a time?
-
         sections = []
-        while True:
-            stmt = self.nxt()
-            if stmt is None:
-                break  # library-end on file-end
+        end: Optional[ast.EndLib] = None
 
-            if isinstance(stmt, EndLib):
+        for stmt in self.stmts:
+
+            # `StartLibSection` and `EndLib` are the *only* valid statements at the library-level.
+
+            if isinstance(stmt, ast.EndLib):
+                end = stmt
                 break  # done with this library
-            elif isinstance(stmt, EndLibSection):
-                # something went wrong; lib section ends without beginning
-                msg = "Invalid `EndLibSection` without `StartLibSection`"
-                self.fail(msg)
-            elif isinstance(stmt, StartLibSection):
+
+            elif isinstance(stmt, ast.StartLibSection):
                 s = self.collect_lib_section(start=stmt)
                 sections.append(s)
-            else:
-                msg = f"Invalid statement in library: {stmt}"
-                self.fail(msg)  # invalid type
 
-        return Library(name=start.name, sections=sections)
+            else:  # invalid type
+                msg = f"Invalid statement in library: {stmt}"
+                self.fail(msg)
+
+        # FIXME: not finding an `end` implies we reached end-of-input. Is that a valid or errant case? Error for now.
+        if end is None:
+            msg = f"`Library` lacking `EndLib`: {start}"
+            self.fail(msg)
+
+        return ast.Library(name=start.name, sections=sections)
+
+    def collect_protected_section(
+        self, start: ast.StartProtectedSection
+    ) -> ast.ProtectedSection:
+        """ Collect a `ProtectedSection`. 
+        Protected sections only have very basic support here, 
+        for containing scalar elements such as `option`s.
+        Any attempts to define nested elements such as `SubcktDef`, `LibSection`, or nested `ProtectedSection`s fail. """
+
+        entries = []
+        end: Optional[ast.EndProtectedSection] = None
+
+        for stmt in self.stmts:
+
+            if isinstance(stmt, ast.EndProtectedSection):
+                end = stmt
+                break  # done defining this section
+
+            # Ban essentially all delimiter and nested elements
+            banned = (
+                StartProtectedSection,
+                StartLib,
+                EndLib,
+                StartLibSection,
+                EndLibSection,
+                End,
+                SubcktDef,
+                Library,
+                LibSection,
+                ProtectedSection,
+                End,
+            )
+            if isinstance(stmt, banned):
+                msg = "Invalid statement in ProtectedSection: {stmt}"
+                self.fail(msg)
+
+            # Copy everything else along
+            if not isinstance(stmt, get_args(ast.Entry)):
+                raise TypeError(str(stmt))
+            entries.append(stmt)
+
+        # FIXME: not finding an `end` implies we reached end-of-input. Is that a valid or errant case? Error for now.
+        if end is None:
+            msg = f"Protected Section lacking `unprotect`: {start}"
+            self.fail(msg)
+
+        return ast.ProtectedSection(entries)
+
+    def fail(self, *args, **kwargs):
+        raise NotImplementedError
