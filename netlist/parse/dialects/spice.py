@@ -4,7 +4,7 @@
 from typing import Optional, Union
 
 # Local Imports
-from ...data import *
+from ...data import ast, NetlistDialects, Ident 
 from .base import DialectParser, Tokens
 
 
@@ -110,11 +110,11 @@ class SpiceDialectParser(DialectParser):
                 path += self.cur.val
         return path
 
-    def parse_param_statement(self) -> ParamDecls:
+    def parse_param_statement(self) -> ast.ParamDecls:
         """ Parse a Parameter-Declaration Statement """
         self.expect(Tokens.PARAM)
         vals = self.parse_param_declarations()  # NEWLINE is captured inside
-        return ParamDecls(vals)
+        return ast.ParamDecls(vals)
 
     def parse_model(self) -> Union[ast.ModelDef, ast.ModelVariant]:
         """ Parse SPICE .model Statements """
@@ -165,7 +165,7 @@ class SpiceDialectParser(DialectParser):
         self.match(Tokens.OPTION)
         vals = self.parse_option_values()
         self.match(Tokens.NEWLINE)
-        return Options(name=None, vals=vals)
+        return ast.Options(name=None, vals=vals)
 
     def are_stars_comments_now(self) -> bool:
         from .base import ParserState

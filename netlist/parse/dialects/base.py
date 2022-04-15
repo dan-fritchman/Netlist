@@ -8,7 +8,16 @@ from textwrap import dedent
 from typing import Iterable, Any, Optional, List, Union, Tuple
 
 # Local Imports
-from ...data import *
+from ...data import (
+    ast,
+    NetlistDialects,
+    Ident,
+    Int,
+    Float,
+    MetricNum,
+    BinaryOperator,
+    UnaryOperator,
+)
 from ..lex import Lexer, Token, Tokens
 
 
@@ -169,7 +178,7 @@ class DialectParser:
             self.fail(msg)
         return self.root
 
-    def parse_subckt_start(self) -> StartSubckt:
+    def parse_subckt_start(self) -> ast.StartSubckt:
         """ module_name ( port1 port2 port2 ) p1=param1 p2=param2 ... """
 
         # Boolean indication of the `inline`-ness
@@ -197,7 +206,7 @@ class DialectParser:
         params = self.parse_param_declarations()
 
         # And create & return our instance
-        return StartSubckt(name=name, ports=ports, params=params)
+        return ast.StartSubckt(name=name, ports=ports, params=params)
 
     def parse_ident(self) -> Ident:
         """ Parse an Identifier """
@@ -230,11 +239,11 @@ class DialectParser:
         """ Parse list of Identifiers """
         return self.parse_list(self.parse_ident, term=term, MAXN=MAXN)
 
-    def parse_expr_list(self, term, *, MAXN=10_000) -> List[Expr]:
+    def parse_expr_list(self, term, *, MAXN=10_000) -> List[ast.Expr]:
         """ Parse list of Expressions """
         return self.parse_list(self.parse_expr, term=term, MAXN=MAXN)
 
-    def parse_primitive(self) -> Primitive:
+    def parse_primitive(self) -> ast.Primitive:
         """ Parse a Spice-format primitive instance """
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
@@ -264,9 +273,9 @@ class DialectParser:
         # Parse parameters
         params = self.parse_param_values()
         # And create & return our instance
-        return Primitive(name=name, args=args, kwargs=params)
+        return ast.Primitive(name=name, args=args, kwargs=params)
 
-    def parse_instance(self) -> Instance:
+    def parse_instance(self) -> ast.Instance:
         """ iname (? port1 port2 port2 )? mname p1=param1 p2=param2 ... """
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
@@ -296,25 +305,25 @@ class DialectParser:
         # Parse parameters
         params = self.parse_instance_param_values()
         # And create & return our instance
-        return Instance(name=name, module=module, conns=conns, params=params)
+        return ast.Instance(name=name, module=module, conns=conns, params=params)
 
-    def parse_instance_param_values(self) -> List[ParamVal]:
+    def parse_instance_param_values(self) -> List[ast.ParamVal]:
         # Base class parses instance-params as any other params
         return self.parse_param_values()
 
-    def parse_param_val(self) -> ParamVal:
+    def parse_param_val(self) -> ast.ParamVal:
         name = self.parse_ident()
         self.expect(Tokens.EQUALS)
         e = self.parse_expr()
-        return ParamVal(name, e)
+        return ast.ParamVal(name, e)
 
-    def parse_param_declaration(self):
+    def parse_param_declaration(self) -> ast.ParamDecl:
         val = self.parse_param_val()
         # FIXME: Skipping this auxiliary stuff for now
         if self.match(Tokens.DEV_GAUSS):
             self.expect(Tokens.EQUALS)
             _e = self.parse_expr()
-        return ParamDecl(val.name, val.val)
+        return ast.ParamDecl(val.name, val.val)
 
     def parse_param_declarations(self) -> List[ast.ParamDecl]:
         """ Parse a set of parameter declarations """
@@ -345,61 +354,61 @@ class DialectParser:
             val = self.parse_expr()
         return ast.Option(name, val)
 
-    def parse_end_sub(self):
+    def parse_end_sub(self) -> ast.EndSubckt:
         self.expect(Tokens.ENDS)
         if self.match(Tokens.IDENT):
             name = Ident(self.cur.val)
         else:
             name = None
         self.expect(Tokens.NEWLINE)
-        return EndSubckt(name)
+        return ast.EndSubckt(name)
 
-    def parse_expr0(self) -> Expr:
+    def parse_expr0(self) -> ast.Expr:
         """ expr0b ( (<|>|<=|>=) expr0b )? """
         e = self.parse_expr0b()
         if self.match_any(Tokens.GT, Tokens.LT, Tokens.GE, Tokens.LE):
             tp = self.parse_binary_operator(self.cur.tp)
             right = self.parse_expr0b()
-            return BinaryOp(tp=tp, left=e, right=right)
+            return ast.BinaryOp(tp=tp, left=e, right=right)
         return e
 
-    def parse_expr0b(self) -> Expr:
+    def parse_expr0b(self) -> ast.Expr:
         """ expr1 ( (+|-) expr0 )? """
         e = self.parse_expr1()
         if self.match_any(Tokens.PLUS, Tokens.MINUS):
             tp = self.parse_binary_operator(self.cur.tp)
             right = self.parse_expr0b()
-            return BinaryOp(tp=tp, left=e, right=right)
+            return ast.BinaryOp(tp=tp, left=e, right=right)
         return e
 
-    def parse_expr1(self) -> Expr:
+    def parse_expr1(self) -> ast.Expr:
         """ expr2 ( (*|/) expr1 )? """
         e = self.parse_expr2()
         if self.match_any(Tokens.STAR, Tokens.SLASH):
             tp = self.parse_binary_operator(self.cur.tp)
             right = self.parse_expr1()
-            return BinaryOp(tp=tp, left=e, right=right)
+            return ast.BinaryOp(tp=tp, left=e, right=right)
         return e
 
-    def parse_expr2(self) -> Expr:
+    def parse_expr2(self) -> ast.Expr:
         """ expr3 ( (**|^) expr2 )? """
         e = self.parse_expr2b()
         if self.match_any(Tokens.DUBSTAR, Tokens.CARET):
             tp = self.parse_binary_operator(self.cur.tp)
-            return BinaryOp(tp=tp, left=e, right=self.parse_expr2())
+            return ast.BinaryOp(tp=tp, left=e, right=self.parse_expr2())
         return e
 
-    def parse_expr2b(self) -> Expr:
+    def parse_expr2b(self) -> ast.Expr:
         """ expr3 ( ? expr0 : expr0 )? """
         e = self.parse_expr3()
         if self.match(Tokens.QUESTION):
             if_true = self.parse_expr0()
             self.expect(Tokens.COLON)
             if_false = self.parse_expr0()
-            return TernOp(e, if_true, if_false)
+            return ast.TernOp(e, if_true, if_false)
         return e
 
-    def parse_expr3(self) -> Expr:
+    def parse_expr3(self) -> ast.Expr:
         """ ( expr ) or term """
         if self.match(Tokens.LPAREN):
             e = self.parse_expr()
@@ -418,7 +427,7 @@ class DialectParser:
             return Int(int(self.cur.val))
         if self.match_any(Tokens.PLUS, Tokens.MINUS):
             tp = self.parse_unary_operator(self.cur.tp)
-            return UnaryOp(tp=tp, targ=self.parse_term())
+            return ast.UnaryOp(tp=tp, targ=self.parse_term())
         if self.match(Tokens.IDENT):
             name = Ident(self.cur.val)
             if self.match(Tokens.LPAREN):  # Function-call syntax
@@ -435,7 +444,7 @@ class DialectParser:
                     self.expect(Tokens.COMMA)
                 if i <= 0:  # Check the time-out
                     self.fail()
-                return Call(func=name, args=args)
+                return ast.Call(func=name, args=args)
             return name
         self.fail(f"Unexpected token while parsing expression-term: {self.cur}")
 
@@ -508,7 +517,7 @@ class DialectParser:
             return None
         return tp, pairs[tp]
 
-    def parse_expr(self) -> Expr:
+    def parse_expr(self) -> ast.Expr:
         """ Parse an Expression 
         expr0 | 'expr0' | {expr0} """
         # Note: moves into our `EXPR` state require a `peek`/`expect` combo,
@@ -546,13 +555,13 @@ class DialectParser:
         currently be lexed as a comment. """
         raise NotImplementedError
 
-    def parse_statement(self) -> Optional[Statement]:
+    def parse_statement(self) -> Optional[ast.Statement]:
         """ Statement Parser 
         Dispatches to type-specific parsers based on prioritized set of matching rules. 
         Returns `None` at end. """
         raise NotImplementedError
 
-    def parse_model(self) -> Expr:
+    def parse_model(self) -> ast.Expr:
         """ Parse a Model Declaration """
         raise NotImplementedError
 

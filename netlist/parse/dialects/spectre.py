@@ -5,7 +5,17 @@
 from typing import Optional, Union, List
 
 # Local Imports
-from ...data import *
+from ...data import (
+    ast,
+    NetlistDialects,
+    Ident,
+    Int,
+    Float,
+    MetricNum,
+    BinaryOperator,
+    UnaryOperator,
+)
+
 from ..lex import Tokens
 from .spice import DialectParser, SpiceDialectParser
 
@@ -15,14 +25,14 @@ class SpectreMixin:
     primarily related to the capacity for `DialectChanges` 
     via a `simulator lang` statement. """
 
-    def parse_dialect_change(self) -> Optional[DialectChange]:
+    def parse_dialect_change(self) -> Optional[ast.DialectChange]:
         """ Parse a DialectChange. Leaves its trailing NEWLINE to be parsed by a (likely new) DialectParser. """
 
         self.expect(Tokens.SIMULATOR)
         self.expect(Tokens.LANG)
         self.expect(Tokens.EQUALS)
         self.expect(Tokens.IDENT)
-        d = DialectChange(self.cur.val)
+        d = ast.DialectChange(self.cur.val)
 
         # FIXME: ignoring additional parameters e.g. `insensitive`
         while self.nxt and self.nxt.tp != Tokens.NEWLINE:
@@ -41,7 +51,7 @@ class SpectreSpiceDialectParser(SpectreMixin, SpiceDialectParser):
 
     enum = NetlistDialects.SPECTRE_SPICE
 
-    def parse_statement(self) -> Optional[Statement]:
+    def parse_statement(self) -> Optional[ast.Statement]:
         """ Mix-in the `simulator lang` DialectChange Statments """
         self.eat_blanks()
         pk = self.peek()
@@ -56,7 +66,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
 
     enum = NetlistDialects.SPECTRE
 
-    def parse_statement(self) -> Optional[Statement]:
+    def parse_statement(self) -> Optional[ast.Statement]:
         """ Statement Parser 
         Dispatches to type-specific parsers based on prioritized set of matching rules. 
         Returns `None` at end. """
@@ -113,8 +123,8 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         # No match - error time.
         self.fail()
 
-    def parse_model(self) -> Union[ModelDef, ModelFamily]:
-        """ Parse a Model statement """
+    def parse_model(self) -> Union[ast.ModelDef, ast.ModelFamily]:
+        """ Parse a Model statement, which can resolve to either a single `ModelDef` or a `ModelFamily`-full of variants.  """
         self.expect(Tokens.MODEL)
         mname = self.parse_ident()
         mtype = self.parse_ident()
@@ -127,14 +137,14 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
                 vname = Ident(str(self.cur.val))
                 self.expect(Tokens.COLON)
                 params = self.parse_param_declarations()
-                vars.append(ModelVariant(mname, vname, mtype, [], params))
+                vars.append(ast.ModelVariant(mname, vname, mtype, [], params))
             self.expect(Tokens.NEWLINE)
-            return ModelFamily(mname, mtype, vars)
+            return ast.ModelFamily(mname, mtype, vars)
         # Single ModelDef
         params = self.parse_param_declarations()
-        return ModelDef(mname, mtype, [], params)
+        return ast.ModelDef(mname, mtype, [], params)
 
-    def parse_param_statement(self) -> ParamDecls:
+    def parse_param_statement(self) -> ast.ParamDecls:
         """ Parse a Parameter-Declaration Statement """
         from .base import _endargs_startkwargs
 
@@ -145,12 +155,12 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         if self.nxt and self.nxt.tp == Tokens.EQUALS:
             self.rewind()
             args.pop()
-        args = [ParamDecl(a, None) for a in args]
+        args = [ast.ParamDecl(a, None) for a in args]
         # Parse the remaining default-valued params
         vals = self.parse_param_declarations()  # NEWLINE is captured inside
-        return ParamDecls(args + vals)
+        return ast.ParamDecls(args + vals)
 
-    def parse_variations(self) -> List[Variation]:
+    def parse_variations(self) -> List[ast.Variation]:
         """ Parse a list of variation-statements, of the form
         `{ 
             vary param1 dist=distname std=stdval 
@@ -189,12 +199,12 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
                     percent = self.parse_expr()
                 else:
                     self.fail()
-            vars.append(Variation(name, dist, std))  # FIXME: roll in `percent`
+            vars.append(ast.Variation(name, dist, std))  # FIXME: roll in `percent`
 
         self.expect(Tokens.NEWLINE)
         return vars
 
-    def parse_statistics_block(self) -> StatisticsBlock:
+    def parse_statistics_block(self) -> ast.StatisticsBlock:
         """ Parse the `statistics` block """
 
         self.expect(Tokens.STATS)
@@ -218,17 +228,17 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
                 self.fail()
 
         self.expect(Tokens.NEWLINE)
-        return StatisticsBlock(process=process, mismatch=mismatch)
+        return ast.StatisticsBlock(process=process, mismatch=mismatch)
 
     def parse_ahdl(self):
         """ Parse an `ahdl_include` statement """
         self.expect(Tokens.AHDL)
         path = self.parse_quote_string()
-        rv = AhdlInclude(path)
+        rv = ast.AhdlInclude(path)
         self.expect(Tokens.NEWLINE)
         return rv
 
-    def parse_instance_param_values(self) -> List[ParamVal]:
+    def parse_instance_param_values(self) -> List[ast.ParamVal]:
         """ Parse a list of instance parameter-values, 
         including the fun-fact that Spectre allows arbitrary dangling closing parens. """
         term = (
@@ -249,9 +259,9 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
         self.expect(Tokens.NEWLINE)
-        return StartLib(name)
+        return ast.StartLib(name)
 
-    def parse_start_section(self):
+    def parse_start_section(self) -> ast.StartLibSection:
         self.expect(Tokens.SECTION)
 
         if self.match(Tokens.EQUALS):
@@ -260,36 +270,36 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
         self.expect(Tokens.NEWLINE)
-        return StartLibSection(name)
+        return ast.StartLibSection(name)
 
-    def parse_end_section(self):
+    def parse_end_section(self) -> ast.EndLibSection:
         self.expect(Tokens.ENDSECTION)
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
         self.expect(Tokens.NEWLINE)
-        return EndLibSection(name)
+        return ast.EndLibSection(name)
 
-    def parse_options(self):
+    def parse_options(self) -> ast.Options:
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
         self.expect(Tokens.OPTIONS)
         vals = self.parse_option_values()
-        return Options(name=name, vals=vals)
+        return ast.Options(name=name, vals=vals)
 
-    def parse_include(self) -> Union[Include, UseLib]:
+    def parse_include(self) -> Union[ast.Include, ast.UseLib]:
         """ Parse an Include Statement """
         self.expect(Tokens.INCLUDE)
         path = self.parse_quote_string()
         if self.match(Tokens.NEWLINE):  # Non-sectioned `Include`
-            return Include(path)
+            return ast.Include(path)
         # Otherwise expect a library `Section`
         self.expect(Tokens.SECTION)
         self.expect(Tokens.EQUALS)
         self.expect(Tokens.IDENT)
         section = Ident(self.cur.val)
-        return UseLib(path, section)
+        return ast.UseLib(path, section)
 
-    def parse_function_def(self):
+    def parse_function_def(self)-> ast.FunctionDef:
         """ Yes, Spectre does have function definitions! 
         Syntax: `rtype name (argtype argname, argtype argname) {
             statements;
@@ -313,7 +323,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
                 Tokens.REAL
             )  # Argument type. FIXME: support more types than REAL
             self.expect(Tokens.IDENT)
-            a = TypedArg(tp=Ident("real"), name=Ident(self.cur.val))
+            a = ast.TypedArg(tp=Ident("real"), name=Ident(self.cur.val))
             args.append(a)
             if self.match(Tokens.RPAREN):
                 break
@@ -326,11 +336,11 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         # Return-statement
         self.expect(Tokens.RETURN)
         rv = self.parse_expr()
-        ret = Return(rv)
+        ret = ast.Return(rv)
         self.expect(Tokens.SEMICOLON)
         self.expect(Tokens.NEWLINE)
         # Function-Closing
         self.expect(Tokens.RBRACKET)
         self.expect(Tokens.NEWLINE)
 
-        return FunctionDef(name=name, rtype=Ident("real"), args=args, stmts=[ret])
+        return ast.FunctionDef(name=name, rtype=Ident("real"), args=args, stmts=[ret])

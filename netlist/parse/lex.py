@@ -9,9 +9,6 @@ from typing import Iterable, Optional
 # PyPi Imports
 from pydantic.dataclasses import dataclass
 
-# Local Imports
-from ..data import *
-
 
 # Numeric-value suffixes
 suffixes = dict(

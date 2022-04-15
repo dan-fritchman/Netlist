@@ -10,9 +10,8 @@ from typing import List, Tuple, Optional, Sequence, Union, Set, get_args
 from pydantic.dataclasses import dataclass
 
 # Local Imports
-from . import dialects 
 from .dialects import DialectParser, NetlistParseError
-from ..data import *
+from ..data import ast, NetlistDialects
 
 
 class ErrorMode(Enum):
@@ -35,7 +34,7 @@ def parse(
     src: Union[os.PathLike, Sequence[os.PathLike]],
     *,
     options: Optional[ParseOptions] = None,
-) -> Program:
+) -> ast.Program:
     """ 
     Primary netist-parsing entry point.  
     Parse a multi-file netlist-`Program` starting at file or files `src`. 
@@ -58,7 +57,7 @@ def parse(
     p.parse()
 
     for e in p.entries():
-        if isinstance(e, Unknown):
+        if isinstance(e, ast.Unknown):
             warn(f"Unknown Netlist Entry {e}")
 
     # Return the parsed `Program`
@@ -94,7 +93,7 @@ class Parser:
         # Initialize the dialects for each file
         self.pending_dialects = {s: options.dialect for s in self.pending}
         self.done: Set[Path] = set()
-        self.program = Program([])
+        self.program = ast.Program([])
         self.dialect = options.dialect
         self.file_parser = None
 
@@ -105,7 +104,7 @@ class Parser:
             sourcefile = self.parse_one()
             self.program.files.append(sourcefile)
 
-    def parse_one(self) -> SourceFile:
+    def parse_one(self) -> ast.SourceFile:
         """ Parse a single file, returning its resultant `SourceFile` tree. 
         Note the result-value *is not* stored in `self.program`. """
 
@@ -123,21 +122,21 @@ class Parser:
         self.done.add(p)
 
         # Filter out a few things
-        stmts = [e for e in stmts if not isinstance(e, DialectChange)]
+        stmts = [e for e in stmts if not isinstance(e, ast.DialectChange)]
 
         # Recursively descend into files it depends upon
         if self.options.recurse:
-            file_stmts = [e for e in stmts if isinstance(e, (Include, UseLib))]
+            file_stmts = [e for e in stmts if isinstance(e, (ast.Include, ast.UseLib))]
             self.recurse(path, file_stmts)
 
         # Form into a scope-hierarchical tree, and add it to our result-`Program`
         sourcefile = hierarchicalize(path, stmts)
         return sourcefile
 
-    def recurse(self, path: Path, contents: List[Statement]):
+    def recurse(self, path: Path, contents: List[ast.Statement]):
         """ Parse included-files in SourceFile `f` """
         for s in contents:
-            if isinstance(s, (Include, UseLib)):
+            if isinstance(s, (ast.Include, ast.UseLib)):
                 # Differentiate absolute vs relative paths, relative to active source-file
                 incp = s.path if s.path.is_absolute() else path.parent / s.path
                 incp = incp.resolve()
@@ -186,7 +185,7 @@ class FileParser:
         self.options = options
         self.line_num = 1
 
-    def notify(self, reason: DialectChange):
+    def notify(self, reason: ast.DialectChange):
         """ Notification from dialect-parser that something's up. 
         E.g. for dialect changes via `simulator lang` statements. """
 
@@ -201,7 +200,7 @@ class FileParser:
         dcls = DialectParser.from_enum(dialect)
         self.dialect_parser = dcls.from_parser(self.dialect_parser)
 
-    def _parse_file(self) -> List[Statement]:
+    def _parse_file(self) -> List[ast.Statement]:
         """ Parse the (open) file-pointer at `self.fp` """
 
         # Create our iterator over file-lines, and core dialect-parser
@@ -213,7 +212,7 @@ class FileParser:
         stmts = []
         s = True
         while s:  # Main loop over statements
-            si = SourceInfo(
+            si = ast.SourceInfo(
                 line=self.dialect_parser.line_num, dialect=self.dialect_parser.enum,
             )
 
@@ -225,7 +224,7 @@ class FileParser:
                     raise e
                 # Otherwise, we include `Unknown` statements
                 warn(e)  # Issue a warning
-                s = Unknown("")  # FIXME: include the line-content in Unknowns
+                s = ast.Unknown("")  # FIXME: include the line-content in Unknowns
                 self.dialect_parser.eat_rest_of_statement()
 
             if s is not None:  # None-value indicates EOF
@@ -234,7 +233,7 @@ class FileParser:
 
         return stmts
 
-    def parse(self, path: Path) -> Tuple[Path, List[Statement]]:
+    def parse(self, path: Path) -> Tuple[Path, List[ast.Statement]]:
         """ Parse the netlist `SourceFile` at `path`. """
         with codecs.open(path, "r", encoding="utf-8", errors="replace") as f:
             self.path = path
@@ -243,10 +242,10 @@ class FileParser:
         return (path, stmts)
 
 
-def hierarchicalize(p: Path, stmts: List[Statement]) -> SourceFile:
+def hierarchicalize(p: Path, stmts: List[ast.Statement]) -> ast.SourceFile:
     """ Convert a flat list of Statements into a hierarchical tree """
     nodes = HierarchyCollector(stmts).collect_source_file()
-    return SourceFile(p, nodes)
+    return ast.SourceFile(p, nodes)
 
 
 class HierarchyCollector:
@@ -256,12 +255,12 @@ class HierarchyCollector:
     * (Potentially nested) sub-circuit definitions. 
     """
 
-    def __init__(self, stmts: List[Statement]):
+    def __init__(self, stmts: List[ast.Statement]):
         # Statements are stored in an iterator, which maintains a single state/ index.
         # So all these nested `collect_*` calls `for` loops are incrementing the same index through it.
         self.stmts = iter(stmts)
 
-    def collect_source_file(self) -> List[Entry]:
+    def collect_source_file(self) -> List[ast.Entry]:
         """ Primary Entry Point. 
         Transform a list of flat file-entries to a hierarchical tree of file-nodes. 
         While the return-type is `List[Entry]`, these lists are designed as the content of a `SourceFile`. """
@@ -282,10 +281,10 @@ class HierarchyCollector:
                 s = self.collect_protected_section(start=stmt)
 
             # Append any parameter-declarations to our running list
-            elif isinstance(stmt, ParamDecl):
+            elif isinstance(stmt, ast.ParamDecl):
                 params.append(stmt)
                 continue
-            elif isinstance(stmt, ParamDecls):
+            elif isinstance(stmt, ast.ParamDecls):
                 params.extend(stmt.params)
                 continue
 
@@ -299,7 +298,7 @@ class HierarchyCollector:
         if params:
             # If we found any parameters, stick them at the beginning of the nodes-list.
             # This tends to be the most interpretable for eventual netlist formats.
-            nodes = [ParamDecls(params)] + nodes
+            nodes = [ast.ParamDecls(params)] + nodes
 
         return nodes
 
@@ -448,17 +447,17 @@ class HierarchyCollector:
 
             # Ban essentially all delimiter and nested elements
             banned = (
-                StartProtectedSection,
-                StartLib,
-                EndLib,
-                StartLibSection,
-                EndLibSection,
-                End,
-                SubcktDef,
-                Library,
-                LibSection,
-                ProtectedSection,
-                End,
+                ast.StartProtectedSection,
+                ast.StartLib,
+                ast.EndLib,
+                ast.StartLibSection,
+                ast.EndLibSection,
+                ast.End,
+                ast.SubcktDef,
+                ast.Library,
+                ast.LibSection,
+                ast.ProtectedSection,
+                ast.End,
             )
             if isinstance(stmt, banned):
                 msg = "Invalid statement in ProtectedSection: {stmt}"
@@ -477,4 +476,4 @@ class HierarchyCollector:
         return ast.ProtectedSection(entries)
 
     def fail(self, *args, **kwargs):
-        raise NotImplementedError
+        raise NotImplementedError # FIXME! Some real content here
