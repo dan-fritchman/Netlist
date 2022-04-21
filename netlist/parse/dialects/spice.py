@@ -4,7 +4,7 @@
 from typing import Optional, Union
 
 # Local Imports
-from ...data import ast, NetlistDialects, Ident 
+from ...data import ast, NetlistDialects, Ident
 from .base import DialectParser, Tokens
 
 
@@ -110,11 +110,33 @@ class SpiceDialectParser(DialectParser):
                 path += self.cur.val
         return path
 
-    def parse_param_statement(self) -> ast.ParamDecls:
-        """ Parse a Parameter-Declaration Statement """
+    def parse_param_statement(self) -> Union[ast.ParamDecls, ast.FunctionDef]:
+        """ 
+        Parse a `.param` statement, which defines one of: 
+
+        * (a) A set of parameter-declaration `ParamDecl`s, or 
+        * (b) A *single* "parameter function" `FunctionDef`. 
+        
+        Netlist syntax mixing the two, e.g. 
+        ```
+        .param a=5 b=6 func(x,y) 'x*a +y*b'
+        ``` 
+        is not supported. 
+        """
         self.expect(Tokens.PARAM)
-        vals = self.parse_param_declarations()  # NEWLINE is captured inside
-        return ast.ParamDecls(vals)
+
+        # Parse the first key-name, so we can see what follows
+        _ = self.parse_ident()
+        if self.nxt and self.nxt.tp == Tokens.LPAREN:
+            # This is a function definition. 
+            returnfunc = self.parse_function_def
+        else: # Otherwise, parse a set of parameter-declarations
+            returnfunc = lambda: ast.ParamDecls(self.parse_param_declarations())
+        
+        # Either way, push the first ident back on before calling `returnfunc`
+        self.rewind()
+        # And call the parsing function for either the `ParamDecls` or `FunctionDef`
+        return returnfunc()
 
     def parse_model(self) -> Union[ast.ModelDef, ast.ModelVariant]:
         """ Parse SPICE .model Statements """
@@ -161,11 +183,46 @@ class SpiceDialectParser(DialectParser):
         # Call that closure we created, making either a `ModelDef` or `ModelVariant`
         return partial((args, params))
 
-    def parse_options(self):
+    def parse_options(self) -> ast.Options:
         self.match(Tokens.OPTION)
         vals = self.parse_option_values()
         self.match(Tokens.NEWLINE)
         return ast.Options(name=None, vals=vals)
+
+    def parse_function_def(self) -> ast.FunctionDef:
+        """ Yes, Spice netlists (or at least *some* versions thereof) do have function definitions! 
+        Sort of. They are more like Python's lambda-functions in being limited to a single-line, single-expression. 
+        
+        Syntax: `funcname (argname1, argname2) 'return_expr'`
+        
+        While arguments are stored as `ast.TypedArg`s, all of their `tp` fields are set to `ArgType.UNKNOWN`.
+        """
+        name = self.parse_ident()
+        self.expect(Tokens.LPAREN)
+        # Parse arguments
+        args = []
+        MAX_ARGS = 100  # Set a "time-out" so that we don't get stuck here.
+        for i in range(MAX_ARGS, -1, -1):
+            if self.match(Tokens.RPAREN):
+                break  # Note we can have zero-argument cases, I guess.
+            a = ast.TypedArg(tp=ast.ArgType.UNKNOWN, name=self.parse_ident())
+            args.append(a)
+            if self.match(Tokens.RPAREN):
+                break
+            self.expect(Tokens.COMMA)
+        if i <= 0:  # Check the time-out
+            self.fail(f"Unable to parse argument list for spice-function {name.name}")
+
+        self.expect(Tokens.EQUALS)
+        self.expect(Tokens.TICK)
+        # Parse the return-expression
+        ret = ast.Return(self.parse_expr())
+        self.expect(Tokens.TICK)
+        self.expect(Tokens.NEWLINE)
+
+        return ast.FunctionDef(
+            name=name, rtype=ast.ArgType.UNKNOWN, args=args, stmts=[ret]
+        )
 
     def are_stars_comments_now(self) -> bool:
         from .base import ParserState

@@ -157,7 +157,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
             args.pop()
         args = [ast.ParamDecl(a, None) for a in args]
         # Parse the remaining default-valued params
-        vals = self.parse_param_declarations()  # NEWLINE is captured inside
+        vals = self.parse_param_declarations() 
         return ast.ParamDecls(args + vals)
 
     def parse_variations(self) -> List[ast.Variation]:
@@ -299,7 +299,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         section = Ident(self.cur.val)
         return ast.UseLib(path, section)
 
-    def parse_function_def(self)-> ast.FunctionDef:
+    def parse_function_def(self) -> ast.FunctionDef:
         """ Yes, Spectre does have function definitions! 
         Syntax: `rtype name (argtype argname, argtype argname) {
             statements;
@@ -310,26 +310,23 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         * Only single-statement functions comprising a `return Expr;` are supported
         """
         self.expect(Tokens.REAL)  # Return type. FIXME: support more types than REAL
-        self.expect(Tokens.IDENT)
-        name = Ident(self.cur.val)
+        name = self.parse_ident()
         self.expect(Tokens.LPAREN)
         # Parse arguments
         args = []
         MAX_ARGS = 100  # Set a "time-out" so that we don't get stuck here.
         for i in range(MAX_ARGS, -1, -1):
             if self.match(Tokens.RPAREN):
-                break
-            self.expect(
-                Tokens.REAL
-            )  # Argument type. FIXME: support more types than REAL
-            self.expect(Tokens.IDENT)
-            a = ast.TypedArg(tp=Ident("real"), name=Ident(self.cur.val))
+                break  # Note we can have zero-argument cases, I guess.
+            # Argument type. FIXME: support more types than REAL
+            self.expect(Tokens.REAL)
+            a = ast.TypedArg(tp=ast.ArgType.REAL, name=self.parse_ident())
             args.append(a)
             if self.match(Tokens.RPAREN):
                 break
             self.expect(Tokens.COMMA)
         if i <= 0:  # Check the time-out
-            self.fail()
+            self.fail(f"Unable to parse argument list for spectre-function {name.name}")
 
         self.expect(Tokens.LBRACKET)
         self.expect(Tokens.NEWLINE)
@@ -343,4 +340,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         self.expect(Tokens.RBRACKET)
         self.expect(Tokens.NEWLINE)
 
-        return ast.FunctionDef(name=name, rtype=Ident("real"), args=args, stmts=[ret])
+        return ast.FunctionDef(
+            name=name, rtype=ast.ArgType.REAL, args=args, stmts=[ret]
+        )
+

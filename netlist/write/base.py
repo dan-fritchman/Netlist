@@ -17,8 +17,8 @@ from ..data import *
 class ErrorMode(Enum):
     """ Enumerated Error-Response Strategies """
 
-    RAISE = 0  # Raise any generated exceptions
-    COMMENT = 1  # Write errant entries as commments instead
+    RAISE = "raise"  # Raise any generated exceptions
+    COMMENT = "comment"  # Write errant entries as commments instead
 
 
 class ExpressionState(Enum):
@@ -144,8 +144,8 @@ class Netlister:
         # And ensure all output makes it to `self.dest`
         self.dest.flush()
 
-    def fail(self, entry: Entry, msg: str) -> None:
-        """ React to a failure, depending on `self.errormode`. """
+    def handle_error(self, entry: Entry, msg: str) -> None:
+        """ React to an error, depending on `self.errormode`. """
         if self.errormode is ErrorMode.RAISE:
             raise RuntimeError(msg)
         elif self.errormode is ErrorMode.COMMENT:
@@ -197,9 +197,9 @@ class Netlister:
         unsupported = (DialectChange, FunctionDef, Unknown, AhdlInclude, Library)
         # FIXME: is writing `Library` even really a thing?
         if isinstance(entry, unsupported):
-            return self.fail(entry, f"Unsupported Entry: {entry}")
+            return self.handle_error(entry, f"Unsupported Entry: {entry}")
 
-        return self.fail(entry, f"Invalid Entry: {entry}")
+        return self.handle_error(entry, f"Invalid Entry: {entry}")
 
     def write(self, s: str) -> None:
         """ Helper/wrapper, passing to `self.dest` """

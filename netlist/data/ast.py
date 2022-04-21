@@ -11,8 +11,9 @@ or whether dependencies between them are valid.
 """
 
 # Std-Lib Imports
-from enum import Enum
+from enum import Enum, auto
 from pathlib import Path
+from dataclasses import field 
 from typing import Optional, Union, List, Tuple
 
 # PyPi Imports
@@ -43,7 +44,7 @@ def datatype(cls: type) -> type:
     anno = getattr(cls, "__annotations__", {})
     anno["source_info"] = Optional[SourceInfo]
     cls.__annotations__ = anno
-    cls.source_info = None
+    cls.source_info = field(default=None, repr=False)
 
     # Convert it to a `pydantic.dataclasses.dataclass`
     cls = dataclass(cls)
@@ -373,11 +374,18 @@ class Call:
     args: List["Expr"]  # Arguments List
 
 
+class ArgType(Enum):
+    """ Enumerated Supported Types for Function Arguments and Return Values """
+
+    REAL = auto()
+    UNKNOWN = auto()
+
+
 @datatype
 class TypedArg:
     """ Typed Function Argument """
 
-    tp: Ident  # Argument Type
+    tp: ArgType  # Argument Type
     name: Ident  # Argument Name
 
 
@@ -399,7 +407,7 @@ class FunctionDef:
     """ Function Definition """
 
     name: Ident  # Function Name
-    rtype: Ident  # Return Type
+    rtype: ArgType  # Return Type
     args: List[TypedArg]  # Argument List
     stmts: List[FuncStatement]  # Function Body/ Statements
 

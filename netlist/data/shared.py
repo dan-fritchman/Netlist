@@ -5,9 +5,7 @@ Core types used by several layers of netlist representations
 """
 
 # Std-Lib Imports
-from enum import Enum, auto
-from pathlib import Path
-from typing import Optional, Union, Dict, Generic, TypeVar, Sequence, Tuple, Any, List 
+from enum import Enum
 
 # PyPi Imports
 from pydantic.dataclasses import dataclass
@@ -23,18 +21,6 @@ class NetlistDialects(Enum):
     NGSPICE = "ngspice"
     XYCE = "xyce"
     CDL = "cdl"
-
-    @staticmethod
-    def get(spec: "NetlistFormatSpec") -> "NetlistDialects":
-        """ Get the format specified by `spec`, in either enum or string terms. 
-        Only does real work in the case when `spec` is a string, otherwise returns it unchanged. """
-        if isinstance(spec, (NetlistDialects, str)):
-            return NetlistDialects(spec)
-        raise TypeError
-
-
-# Type-alias for specifying format, either in enum or string terms
-NetlistFormatSpec = Union[NetlistDialects, str]
 
 
 def to_json(arg) -> str:

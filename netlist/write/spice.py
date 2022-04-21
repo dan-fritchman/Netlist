@@ -36,11 +36,11 @@ heavily re-using a central `SpiceNetlister` class, but requiring simulator-speci
 import sys
 from enum import Enum
 from warnings import warn
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, get_args
 
 # Local Imports
 from ..data import *
-from .base import Netlister, ErrorMode
+from .base import Netlister
 
 
 class SpiceNetlister(Netlister):
@@ -150,14 +150,16 @@ class SpiceNetlister(Netlister):
             # is a connection, and which is a positional parameter-value.
             # This matters in some contexts, as parameters can be expressions,
             # which may need some expression-evaluation syntax.
-            # For now, if the arguments are not scalars (identifiers or numbers), fail.
+            # For now, write anything that looks like a compound expression as a compound expression. 
             if isinstance(arg, Ident):
                 self.write(self.format_ident(arg) + " ")
             elif isinstance(arg, (Int, Float, MetricNum)):
                 self.write(self.format_number(arg) + " ")
             else:
-                msg = f"Primitive instance {pinst.name} has non-scalar argument {arg}"
-                raise RuntimeError(msg)
+                self.write(self.format_expr(arg) + " ")
+            # else:
+            #     msg = f"Primitive instance {pinst.name} has non-scalar argument {arg}"
+            #     self.handle_error(msg)
         self.write(" \n")
 
         self.write("+ ")
@@ -285,22 +287,6 @@ class SpiceNetlister(Netlister):
         """ While dialects vary, the *generic* Spice-comment begins with the asterisk. """
         self.write(f"* {comment}\n")
 
-    def format_expression(self, expr: str) -> str:
-        """ Format a string such that the target format interprets it as an expression. 
-        Example:
-        ```
-        * Parameter Declarations
-        .param v0=1 v1='v0+1' * <= Here
-        * Instance with the same name 
-        v0 1 0 dc='v0+2*v1' * <= And here 
-        ``` 
-        Note the latter case includes the star character (`*`) for multiplication, 
-        where in many other contexts it is treated as the comment-character. 
-        """
-        # The base class does what (we think) is the most common practice:
-        # wrapping expressions in single-tick quotes.
-        return f"'{expr}'"
-
     def write_options(self, options: Options) -> None:
         """ Write Options `options` """
         if options.name is not None:
@@ -313,7 +299,7 @@ class SpiceNetlister(Netlister):
         self.write(".option \n")
         for option in options.vals:
             self.write("+ ")
-            # FIXME: add the cases included in `OptionVal` but not `ParamVal`, notably quoted string-paths 
+            # FIXME: add the cases included in `OptionVal` but not `ParamVal`, notably quoted string-paths
             self.write_param_val(option)
             self.write(" \n")
         self.write("\n")
@@ -503,7 +489,8 @@ class XyceNetlister(SpiceNetlister):
             name = self.format_ident(option.name)
             if name not in categories:
                 msg = f"Unknown Xyce option `{name}`, cannot find `.options` category"
-                raise RuntimeError(msg)
+                self.handle_error(option, msg)
+                continue
             category = categories[name].value
             if category not in by_category:
                 by_category[category] = []
@@ -514,7 +501,7 @@ class XyceNetlister(SpiceNetlister):
             self.write(f".options {category_name} \n")
             for option in category_list:
                 self.write("+ ")
-                # FIXME: add the cases included in `OptionVal` but not `ParamVal`, notably quoted string-paths 
+                # FIXME: add the cases included in `OptionVal` but not `ParamVal`, notably quoted string-paths
                 self.write_param_val(option)
                 self.write(" \n")
             self.write("\n")

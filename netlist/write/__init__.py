@@ -5,11 +5,13 @@ Exports a netlist `Program` to a netlist format.
 """
 
 # Std-Lib Imports
-from typing import Union, IO
-from enum import Enum
+from typing import IO, Optional
+
+# PyPi Imports
+from pydantic.dataclasses import dataclass
 
 # Local Imports
-from ..data import NetlistDialects, NetlistFormatSpec, Program
+from ..data import NetlistDialects, Program
 from .base import ErrorMode
 from .spice import (
     SpiceNetlister,
@@ -42,12 +44,15 @@ def writer(fmt: NetlistDialects = NetlistDialects.XYCE) -> type:
         return CdlNetlister
 
 
-def netlist(
-    src: Program,
-    dest: IO,
-    fmt: NetlistFormatSpec = "xyce",
-    errormode: ErrorMode = ErrorMode.RAISE,
-) -> None:
+@dataclass
+class WriteOptions:
+    """ Netlist Writing Options """
+
+    fmt: NetlistDialects = NetlistDialects.XYCE  # Target format, in enumerated or string form
+    errormode: ErrorMode = ErrorMode.RAISE  # Error-handling mode, enumerated in `ErrorMode`
+
+
+def netlist(src: Program, dest: IO, options: Optional[WriteOptions] = None,) -> None:
     """ Write netlist-`Program` `src` to destination `dest`. 
 
     Example usages: 
@@ -67,14 +72,18 @@ def netlist(
     Destination `dest` may be anything that supports the `typing.IO` bundle, 
     commonly including open file-handles. `StringIO` is particularly helpful 
     for producing a netlist in an in-memory string.  
-    Format-specifier `fmt` may be any of the `NetlistDialectsSpec` enumerated values 
-    or their string equivalents.
+    
+    Optional `WriteOptions` argument `options` sets the target format, error-handling strategies, 
+    and any further optional settings. 
     """
-    fmt_enum = NetlistDialects.get(fmt)
-    netlister_cls = writer(fmt_enum)
-    netlister = netlister_cls(src=src, dest=dest, errormode=errormode)
+    if options is None:
+        # Create the default options
+        options = WriteOptions()
+
+    netlister_cls = writer(options.fmt)
+    netlister = netlister_cls(src=src, dest=dest, errormode=options.errormode)
     netlister.netlist()
 
 
 # Set our exported content for star-imports
-__all__ = ["netlist"]
+__all__ = ["netlist", "NetlistDialects", "WriteOptions"]

@@ -574,3 +574,45 @@ def test_model_with_parens():
     p = SpectreSpiceDialectParser.from_str(txt)
     m = p.parse(p.parse_statement)
     assert m == golden
+
+
+def test_spice_function_def():
+    """ Test parsing a SPICE-syntax function-definition """
+    from netlist import SpectreSpiceDialectParser
+    from netlist.data.ast import (
+        Ident,
+        FunctionDef,
+        ArgType,
+        TypedArg,
+        Return,
+        BinaryOp,
+        TernOp,
+    )
+
+    txt = ".param f1(p1, p2) = 'p1 > p2 ? a : b' \n"
+
+    p = SpectreSpiceDialectParser.from_str(txt)
+    m = p.parse(p.parse_statement)
+    print(m)
+    assert m == FunctionDef(
+        name=Ident(name="f1"),
+        rtype=ArgType.UNKNOWN,
+        args=[
+            TypedArg(tp=ArgType.UNKNOWN, name=Ident(name="p1")),
+            TypedArg(tp=ArgType.UNKNOWN, name=Ident(name="p2")),
+        ],
+        stmts=[
+            Return(
+                val=BinaryOp(  ## FIXME! This looks like operator precedence gone wrong!
+                    tp=BinaryOperator.GT,
+                    left=Ident(name="p1"),
+                    right=TernOp(
+                        cond=Ident(name="p2"),
+                        if_true=Ident(name="a"),
+                        if_false=Ident(name="b"),
+                    ),
+                )
+            )
+        ],
+    )
+
