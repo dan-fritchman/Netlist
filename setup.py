@@ -26,14 +26,14 @@ setup(
     author_email="dan@fritch.mn",
     packages=find_packages(),
     python_requires=">=3.8, <4",
-    install_requires=["pydantic==1.8.2",],
+    install_requires=["pydantic==1.9.1",],  # This version here's important!
     extras_require={
         "dev": [
-            "pytest==5.2",
+            "pytest==7.1",
             "coverage",
             "pytest-cov",
-            "black==19.10b0",
-            "click==8.0.1",  # This is transitive on `black`, but required for the CLI to work
+            "pre-commit==2.20",
+            "black==22.6",
             "twine",
         ]
     },
