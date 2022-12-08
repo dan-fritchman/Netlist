@@ -17,7 +17,15 @@ from typing import Optional, Union, List, Tuple, Dict, Any
 from pydantic.dataclasses import dataclass
 
 # Local Imports
-from .shared import SourceInfo, Ident, Int, Float, MetricNum, UnaryOperator, BinaryOperator
+from .shared import (
+    SourceInfo,
+    Ident,
+    Int,
+    Float,
+    MetricNum,
+    UnaryOperator,
+    BinaryOperator,
+)
 
 # Keep a list of datatypes defined here,
 # primarily so that we can update their forward-references at the end of this module.
@@ -25,7 +33,7 @@ datatypes = [SourceInfo]
 
 
 def datatype(cls: type) -> type:
-    """ Register a class as a datatype. """
+    """Register a class as a datatype."""
 
     # Add an `Optional[SourceInfo]` field to the class, with a default value of `None`.
     # Creates the `__annotations__` field if it does not already exist.
@@ -44,15 +52,15 @@ def datatype(cls: type) -> type:
 
 @datatype
 class HierPath:
-    """ Hierarchical Path Identifier """
+    """Hierarchical Path Identifier"""
 
     path: List[Ident]
 
 
 @datatype
 class ParamDecl:
-    """ Parameter Declaration 
-    Includes Optional Distribution Information """
+    """Parameter Declaration
+    Includes Optional Distribution Information"""
 
     name: Ident
     default: Optional["Expr"]
@@ -61,23 +69,23 @@ class ParamDecl:
 
 @datatype
 class ParamDecls:
-    """ Parameter Declarations, 
-    as via the `param` keywords. """
+    """Parameter Declarations,
+    as via the `param` keywords."""
 
     params: List[ParamDecl]
 
 
 @datatype
 class ParamVal:
-    """ Parameter Value-Set """
+    """Parameter Value-Set"""
 
     name: Ident
     val: "Expr"
 
 
 class RefType(Enum):
-    """ External Reference Types Enumeration 
-    Store on each `ExternalRef` to note which types would be valid in context. """
+    """External Reference Types Enumeration
+    Store on each `ExternalRef` to note which types would be valid in context."""
 
     SUBCKT = auto()
     PARAM = auto()
@@ -87,7 +95,7 @@ class RefType(Enum):
 
 @datatype
 class ExternalRef:
-    """ Typed External Reference """
+    """Typed External Reference"""
 
     name: Ident
     valid_types: List[RefType]
@@ -95,7 +103,7 @@ class ExternalRef:
 
 @datatype
 class SubcktInstance:
-    """ Subckt / Module Instance """
+    """Subckt / Module Instance"""
 
     name: Ident  # Instance Name
     module: Union["SubcktDef", ExternalRef]  # Module Definition or External Reference
@@ -106,23 +114,30 @@ class SubcktInstance:
 
 
 class PrimitiveType(Enum):
-    """ Primitive Types Enumeration """
+    """Primitive Types Enumeration"""
 
     MOS = auto()
     BJT = auto()
     DIODE = auto()
     RESISTOR = auto()
     CAPACITOR = auto()
+    INDUCTOR = auto()
+    VSOURCE = auto()
+    ISOURCE = auto()
+    VCVS = auto()
+    CCVS = auto()
+    VCCS = auto()
+    CCCS = auto()
 
 
 @datatype
 class PrimitiveInstance:
-    """ 
-    Primitive Instance 
-    
-    Note at parsing-time, before models are sorted out, 
-    it is not always clear what is a port, model name, and parameter value. 
-    Primitives instead store positional and keyword arguments `args` and `kwargs`. 
+    """
+    Primitive Instance
+
+    Note at parsing-time, before models are sorted out,
+    it is not always clear what is a port, model name, and parameter value.
+    Primitives instead store positional and keyword arguments `args` and `kwargs`.
     """
 
     name: Ident  # Instance Name
@@ -135,14 +150,14 @@ class PrimitiveInstance:
 
 @datatype
 class Options:
-    """ Simulation Options """
+    """Simulation Options"""
 
     vals: List[ParamVal]  # List of {name: value} pairs
 
 
 @datatype
 class SubcktDef:
-    """ Sub-Circuit / Module Definition """
+    """Sub-Circuit / Module Definition"""
 
     name: Ident  # Module/ Subcircuit Name
     ports: List[Ident]  # Port List. FIXME: should this be part of our `Scope`?
@@ -151,7 +166,7 @@ class SubcktDef:
 
 @datatype
 class ModelDef:
-    """ Model Definition """
+    """Model Definition"""
 
     name: Ident  # Model Name
     mtype: Ident  # Model Type
@@ -169,7 +184,7 @@ class ModelType(Enum):
 
 @datatype
 class ModelVariant:
-    """ Model Variant within a `ModelFamily` """
+    """Model Variant within a `ModelFamily`"""
 
     model: Ident  # Model Family Name
     variant: Ident  # Variant Name
@@ -180,8 +195,8 @@ class ModelVariant:
 
 @datatype
 class ModelFamily:
-    """ Model Family 
-    A set of related, identically named models, generally separated by limiting parameters such as {lmin, lmax} or {wmin, wmax}. """
+    """Model Family
+    A set of related, identically named models, generally separated by limiting parameters such as {lmin, lmax} or {wmin, wmax}."""
 
     name: Ident  # Model Family Name
     mtype: Ident  # Model Type
@@ -190,22 +205,22 @@ class ModelFamily:
 
 @datatype
 class Include:
-    """ Include (a File) Statement """
+    """Include (a File) Statement"""
 
     path: Path
 
 
 @datatype
 class AhdlInclude:
-    """ Analog HDL Include (a File) Statement """
+    """Analog HDL Include (a File) Statement"""
 
     path: Path
 
 
 @datatype
 class LibSection:
-    """ Library Section 
-    A named section of a library, commonly incorporated with a `UseLib` or similar. """
+    """Library Section
+    A named section of a library, commonly incorporated with a `UseLib` or similar."""
 
     name: Ident  # Section Name
     scope: "Scope"  # Scoped Definitions
@@ -213,9 +228,9 @@ class LibSection:
 
 @datatype
 class Library:
-    """ Library, as Generated by the Spice `.lib` Definition Card
-    Includes a list of named `LibSection`s which can be included by their string-name, 
-    as common for "corner" inclusions e.g. `.inc "mylib.sp" "tt"`  """
+    """Library, as Generated by the Spice `.lib` Definition Card
+    Includes a list of named `LibSection`s which can be included by their string-name,
+    as common for "corner" inclusions e.g. `.inc "mylib.sp" "tt"`"""
 
     name: Ident  # Library Name
     sections: List[LibSection]  # Library Sections
@@ -223,7 +238,7 @@ class Library:
 
 @datatype
 class UseLib:
-    """ Use a Library """
+    """Use a Library"""
 
     path: Path  # Library File Path
     section: Ident  # Section Name
@@ -231,14 +246,14 @@ class UseLib:
 
 @datatype
 class End:
-    """ Empty class represents `.end` Statements """
+    """Empty class represents `.end` Statements"""
 
     ...
 
 
 @datatype
 class Variation:
-    """ Single-Parameter Variation Declaration """
+    """Single-Parameter Variation Declaration"""
 
     name: Ident  # Parameter Name
     dist: str  # Distribution Name/Type
@@ -247,7 +262,7 @@ class Variation:
 
 @datatype
 class StatisticsBlock:
-    """ Statistical Descriptions """
+    """Statistical Descriptions"""
 
     process: Optional[List[Variation]]
     mismatch: Optional[List[Variation]]
@@ -255,7 +270,7 @@ class StatisticsBlock:
 
 @datatype
 class Unknown:
-    """ Unknown Netlist Statement. Stored as an un-parsed string. """
+    """Unknown Netlist Statement. Stored as an un-parsed string."""
 
     txt: str
 
@@ -267,28 +282,15 @@ class SourceFile:
 
 
 @datatype
-class Program:
-    """ 
-    # Multi-File "Netlist Program" 
-    The name of this type is a bit misleading, but borrowed from more typical compiler-parsers. 
-    Spice-culture generally lacks a term for "the totality of a simulator invocation input", 
-    or even "a pile of source-files to be used together". 
-    So, `Program` it is. 
-    """
-
-    files: List[SourceFile]  # List of Source-File Contents
-
-
-@datatype
 class Call:
-    """ 
-    Function Call Node 
+    """
+    Function Call Node
 
-    All valid parameter-generating function calls return a single value, 
-    usable in a mathematical expression (`Expr`) context. 
-    All arguments are provided by position and stored in a List. 
-    All arguments must also be resolvable as mathematical expressions. 
-    
+    All valid parameter-generating function calls return a single value,
+    usable in a mathematical expression (`Expr`) context.
+    All arguments are provided by position and stored in a List.
+    All arguments must also be resolvable as mathematical expressions.
+
     Examples:
     `sqrt(2)` => Call(func=Ident("sqrt"), args=([Int(2)]),)
     """
@@ -298,7 +300,7 @@ class Call:
 
 
 class ArgType(Enum):
-    """ Function Argument (and Return) Types Enumeration """
+    """Function Argument (and Return) Types Enumeration"""
 
     REAL = "real"
     # (that's it for now)
@@ -306,7 +308,7 @@ class ArgType(Enum):
 
 @datatype
 class TypedArg:
-    """ Typed Function Argument """
+    """Typed Function Argument"""
 
     name: Ident  # Argument Name
     tp: Ident  # Argument Type
@@ -314,7 +316,7 @@ class TypedArg:
 
 @datatype
 class Return:
-    """ Function Return Node """
+    """Function Return Node"""
 
     val: "Expr"
 
@@ -326,7 +328,7 @@ FuncStatement = Union[Return]
 
 @datatype
 class FunctionDef:
-    """ Function Definition """
+    """Function Definition"""
 
     name: Ident  # Function Name
     rtype: ArgType  # Return Type
@@ -348,7 +350,7 @@ Expr = Union[
 
 @datatype
 class UnaryOp:
-    """ Unary Operation """
+    """Unary Operation"""
 
     tp: UnaryOperator  # Operator Type
     targ: Expr  # Target Expression
@@ -356,7 +358,7 @@ class UnaryOp:
 
 @datatype
 class BinaryOp:
-    """ Binary Operation """
+    """Binary Operation"""
 
     tp: BinaryOperator  # Enumerated Operator Type
     left: Expr  # Left Operand Expression
@@ -365,7 +367,7 @@ class BinaryOp:
 
 @datatype
 class TernOp:
-    """ Ternary Operation """
+    """Ternary Operation"""
 
     cond: Expr  # Condition Expression
     if_true: Expr  # Value if `cond` is True
@@ -374,34 +376,49 @@ class TernOp:
 
 @datatype
 class Scope:
-    """ Hierarchical Scope 
-    Collection of named, typed definitions """
+    """Hierarchical Scope
+    Collection of named, typed definitions"""
 
     parent: Optional["Scope"]  # Parent Scope
     children: List["Scope"] = field(default_factory=list)  # Child Scopes
 
     # Contents defined in the source of this scope
-    params: Dict[str, ParamDecl] = field(default_factory=dict)  # Parameters
-    subckt_defs: Dict[str, SubcktDef] = field(default_factory=dict)  # Parameters
-    models: Dict[str, ModelDef] = field(default_factory=dict)  # Model Definitions
-    model_families: Dict[str, ModelFamily] = field(
-        default_factory=dict
-    )  # Model Family Definitions
-    functions: Dict[str, FunctionDef] = field(
-        default_factory=dict
-    )  # Function Definitions
-    subckt_instances: Dict[str, SubcktInstance] = field(
-        default_factory=dict
-    )  # Subcircuit Instances
-    primitive_instances: Dict[str, PrimitiveInstance] = field(
-        default_factory=dict
-    )  # Primitive Instances
-
+    # Parameters
+    params: Dict[str, ParamDecl] = field(default_factory=dict)
+    # Subcircuit Definitions
+    subckt_defs: Dict[str, SubcktDef] = field(default_factory=dict)
+    # Model Definitions
+    models: Dict[str, ModelDef] = field(default_factory=dict)
+    # Model Family Definitions
+    model_families: Dict[str, ModelFamily] = field(default_factory=dict)
+    # Function Definitions
+    functions: Dict[str, FunctionDef] = field(default_factory=dict)
+    # Subcircuit Instances
+    subckt_instances: Dict[str, SubcktInstance] = field(default_factory=dict)
+    # Primitive Instances
+    primitive_instances: Dict[str, PrimitiveInstance] = field(default_factory=dict)
     # Unidentified references to identifiers, and valid types which would fulfill them
-    external: Dict[str, ExternalRef] = field(default_factory=dict)
-
+    external_refs: Dict[str, ExternalRef] = field(default_factory=dict)
     # Other unnamed attributes such as `Option`s
     other: List[Any] = field(default_factory=list)  # FIXME: update type
+
+    @classmethod
+    def root(cls) -> "Scope":
+        """Create a root scope, i.e. one with no parent."""
+        return Scope(parent=None)
+
+
+@datatype
+class Program:
+    """
+    # Multi-File "Netlist Program"
+    The name of this type is a bit misleading, but borrowed from more typical compiler-parsers.
+    Spice-culture generally lacks a term for "the totality of a simulator invocation input",
+    or even "a pile of source-files to be used together".
+    So, `Program` it is.
+    """
+
+    scope: Scope = field(default_factory=Scope.root)
 
 
 # Update all the forward type-references

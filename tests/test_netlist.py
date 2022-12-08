@@ -23,8 +23,8 @@ def test_spice_exprs():
     )
 
     def parse_expression(s: str) -> SpiceDialectParser:
-        """ Parse a string expression, including placing the parser in EXPR mode first, 
-        particularly so that elements like "*" are interpreted as multiplication. """
+        """Parse a string expression, including placing the parser in EXPR mode first,
+        particularly so that elements like "*" are interpreted as multiplication."""
         from netlist.parse.dialects.base import ParserState
 
         parser = SpiceDialectParser.from_str(s)
@@ -50,7 +50,7 @@ def test_spectre_exprs():
     )
 
     def parse_expression(s: str) -> SpectreDialectParser:
-        """ Parse a string expression """
+        """Parse a string expression"""
         from netlist.parse.dialects.base import ParserState
 
         parser = SpectreDialectParser.from_str(s)
@@ -232,7 +232,9 @@ def test_instance():
     from netlist import SpectreDialectParser
     from netlist import Ident, ParamVal, Int, Instance
 
-    p = SpectreDialectParser.from_str("xxx (d g s b) mymos l=11 w=global_w",)
+    p = SpectreDialectParser.from_str(
+        "xxx (d g s b) mymos l=11 w=global_w",
+    )
     i = p.parse(p.parse_instance)
     assert i == Instance(
         name=Ident(name="xxx"),
@@ -252,10 +254,10 @@ def test_instance():
 
 
 def test_instance_parens():
-    """ 
+    """
     Spectre has a fun behavior with dangling close-parens at the end of instance statements -
     it accepts as many as you care to provide.
-    
+
     So it will accept this is a valid instance:
     ```
     rsad 1 0 resistor r=1  )))))) // really, with all those parentheses
@@ -263,10 +265,10 @@ def test_instance_parens():
 
     The same close-paren behavior does not apply to parameter-declaration statements.
     It may apply to other types.
-    
-    You may ask, why should `netlist` inherit what is almost certainly a Spectre bug? 
-    Because, sadly, notable popular commercial netlists and models include some of these errant parentheses, 
-    and therefore only work *because* of the Spectre-bug. So, if we want to parse them, we need that bug too. 
+
+    You may ask, why should `netlist` inherit what is almost certainly a Spectre bug?
+    Because, sadly, notable popular commercial netlists and models include some of these errant parentheses,
+    and therefore only work *because* of the Spectre-bug. So, if we want to parse them, we need that bug too.
     """
 
     txt = "rsad 1 0 resistor r=1  ))))))"
@@ -295,7 +297,9 @@ def test_subckt_def():
         params=[
             ParamDecl(name=Ident(name="l"), default=Int(val=11), distr=None),
             ParamDecl(
-                name=Ident(name="w"), default=Ident(name="global_w"), distr=None,
+                name=Ident(name="w"),
+                default=Ident(name="global_w"),
+                distr=None,
             ),
         ],
     )
@@ -343,25 +347,39 @@ def test_model_family():
                 args=[],
                 params=[
                     ParamDecl(
-                        name=Ident(name="type"), default=Ident(name="n"), distr=None,
+                        name=Ident(name="type"),
+                        default=Ident(name="n"),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="lmin"), default=Float(val=1.0), distr=None,
+                        name=Ident(name="lmin"),
+                        default=Float(val=1.0),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="lmax"), default=Float(val=2.0), distr=None,
+                        name=Ident(name="lmax"),
+                        default=Float(val=2.0),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="wmin"), default=Float(val=1.2), distr=None,
+                        name=Ident(name="wmin"),
+                        default=Float(val=1.2),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="wmax"), default=Float(val=1.4), distr=None,
+                        name=Ident(name="wmax"),
+                        default=Float(val=1.4),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="level"), default=Int(val=999), distr=None,
+                        name=Ident(name="level"),
+                        default=Int(val=999),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="tnom"), default=Int(val=30), distr=None,
+                        name=Ident(name="tnom"),
+                        default=Int(val=30),
+                        distr=None,
                     ),
                 ],
             ),
@@ -372,16 +390,30 @@ def test_model_family():
                 args=[],
                 params=[
                     ParamDecl(
-                        name=Ident(name="type"), default=Ident(name="n"), distr=None,
+                        name=Ident(name="type"),
+                        default=Ident(name="n"),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="version"), default=Float(val=3.2), distr=None,
+                        name=Ident(name="version"),
+                        default=Float(val=3.2),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="xj"), default=Float(val=1.2e-07), distr=None,
+                        name=Ident(name="xj"),
+                        default=Float(val=1.2e-07),
+                        distr=None,
                     ),
-                    ParamDecl(name=Ident(name="lln"), default=Int(val=1), distr=None,),
-                    ParamDecl(name=Ident(name="lwn"), default=Int(val=1), distr=None,),
+                    ParamDecl(
+                        name=Ident(name="lln"),
+                        default=Int(val=1),
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="lwn"),
+                        default=Int(val=1),
+                        distr=None,
+                    ),
                 ],
             ),
         ],
@@ -389,8 +421,8 @@ def test_model_family():
 
 
 def test_spectre_midstream_comment():
-    """ Test for mid-stream full-line comments, which do not break up statements such as `model` 
-    from being line-continued. """
+    """Test for mid-stream full-line comments, which do not break up statements such as `model`
+    from being line-continued."""
 
     txt = dedent(
         """model whatever diode
@@ -442,7 +474,7 @@ def test_spice_include():
 
 
 def test_write1():
-    """ Test writing an empty netlist `Program` """
+    """Test writing an empty netlist `Program`"""
     from netlist import Program, SourceFile, netlist
 
     src = Program(files=[SourceFile(path="/", contents=[])])
@@ -450,7 +482,7 @@ def test_write1():
 
 
 def test_write2():
-    """ Test writing some actual content  """
+    """Test writing some actual content"""
     from netlist import (
         Program,
         SourceFile,
@@ -472,7 +504,10 @@ def test_write2():
                     Options(
                         name=None,
                         vals=[
-                            Option(name=Ident(name="scale"), val=MetricNum(val="1.0u"),)
+                            Option(
+                                name=Ident(name="scale"),
+                                val=MetricNum(val="1.0u"),
+                            )
                         ],
                         source_info=SourceInfo(
                             line=15, dialect=NetlistDialects.SPECTRE_SPICE
@@ -486,7 +521,7 @@ def test_write2():
 
 
 def test_protection():
-    """ Test the `protect` / `unprotect` encryption features """
+    """Test the `protect` / `unprotect` encryption features"""
     from netlist import SpectreDialectParser, SpectreSpiceDialectParser
     from netlist.data import ast
 
@@ -532,7 +567,7 @@ def test_protection():
 
 
 def test_names_including_keywords():
-    """ Test parsing objects whose names include keywords, such as `my_favorite_subckt`. """
+    """Test parsing objects whose names include keywords, such as `my_favorite_subckt`."""
     from netlist import SpectreSpiceDialectParser, Ident, ParamDecls, ParamDecl, Int
 
     txt = ".param my_favorite_model = model_that_works_best \n"
@@ -561,10 +596,22 @@ def test_model_with_parens():
     golden = ModelDef(
         name=Ident(name="mymodel"),
         mtype=Ident(name="mtype"),
-        args=[Ident(name="arg1"), Ident(name="arg2"), Ident(name="arg3"),],
+        args=[
+            Ident(name="arg1"),
+            Ident(name="arg2"),
+            Ident(name="arg3"),
+        ],
         params=[
-            ParamDecl(name=Ident(name="key1"), default=Ident(name="val1"), distr=None,),
-            ParamDecl(name=Ident(name="key2"), default=Ident(name="val2"), distr=None,),
+            ParamDecl(
+                name=Ident(name="key1"),
+                default=Ident(name="val1"),
+                distr=None,
+            ),
+            ParamDecl(
+                name=Ident(name="key2"),
+                default=Ident(name="val2"),
+                distr=None,
+            ),
         ],
     )
     assert m == golden
@@ -577,7 +624,7 @@ def test_model_with_parens():
 
 
 def test_spice_function_def():
-    """ Test parsing a SPICE-syntax function-definition """
+    """Test parsing a SPICE-syntax function-definition"""
     from netlist import SpectreSpiceDialectParser
     from netlist.data.ast import (
         Ident,
@@ -593,7 +640,7 @@ def test_spice_function_def():
 
     p = SpectreSpiceDialectParser.from_str(txt)
     m = p.parse(p.parse_statement)
-    print(m)
+
     assert m == FunctionDef(
         name=Ident(name="f1"),
         rtype=ArgType.UNKNOWN,
@@ -616,3 +663,41 @@ def test_spice_function_def():
         ],
     )
 
+
+def test_nested_subckt_def():
+    """Test parsing nested sub-circuit definitions"""
+    from tempfile import NamedTemporaryFile
+    from netlist import parse
+    from netlist.data.ast import (
+        Ident,
+        FunctionDef,
+        ArgType,
+        TypedArg,
+        Return,
+        BinaryOp,
+        TernOp,
+    )
+
+    txt = dedent(
+        """.subckt a 
+            .subckt b 
+                .subckt c
+                .ends
+                .subckt d 
+                .ends
+                xc c * Instance of `c`
+                xd d * Instance of `d`
+            .ends
+        .ends
+        """
+    )
+    f = NamedTemporaryFile()
+    f.write(bytes(txt, "utf-8"))
+    f.seek(0)
+
+    ast = parse(f.name)
+    print(ast)
+
+    from netlist import ast_to_cst
+    cst = ast_to_cst(ast)
+    print(cst)
