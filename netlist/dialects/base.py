@@ -12,14 +12,14 @@ from ..lex import Lexer, Token, Tokens
 
 
 class ParserState(Enum):
-    """ States of the parser, as they need be understood by the lexer. """
+    """States of the parser, as they need be understood by the lexer."""
 
     PROGRAM = 0  # Typical program content
     EXPR = 1  # High-priority expressions
 
 
 class DialectParser:
-    """ Netlist Dialect-Parsing Base-Class """
+    """Netlist Dialect-Parsing Base-Class"""
 
     enum = None
 
@@ -43,9 +43,9 @@ class DialectParser:
 
     @classmethod
     def from_parser(cls, p: "DialectParser") -> "DialectParser":
-        """ Create from another DialectParser, 
-        as during a `simulator lang` DialectChange.  
-        Includes copying its private internal state. """
+        """Create from another DialectParser,
+        as during a `simulator lang` DialectChange.
+        Includes copying its private internal state."""
         rv = cls(lex=p.lex, parent=p.parent)
         rv.state = p.state
         rv.tokens = p.tokens
@@ -57,20 +57,20 @@ class DialectParser:
 
     @classmethod
     def from_lines(cls, lines: Iterable[str], **kwargs) -> "DialectParser":
-        """ Create from a line iterator """
+        """Create from a line iterator"""
         return cls(lex=Lexer(lines), **kwargs)
 
     @classmethod
     def from_str(cls, txt: str, **kwargs) -> "DialectParser":
-        """ Create from a multi-line input string """
+        """Create from a multi-line input string"""
         ls = [line + "\n" for line in txt.split("\n")[:-1]]
         ls += [txt.split("\n")[-1]]
         return cls.from_lines(lines=iter(ls), **kwargs)
 
     @classmethod
     def from_enum(cls, dialect: Optional["NetlistDialects"] = None):
-        """ Return a Dialect sub-class based on the `NetlistDialects` enum. 
-        Returns the default class if argument `dialect` is not provided or `None`. """
+        """Return a Dialect sub-class based on the `NetlistDialects` enum.
+        Returns the default class if argument `dialect` is not provided or `None`."""
         from .spice import SpiceDialectParser, NgSpiceDialectParser
         from .spectre import SpectreDialectParser, SpectreSpiceDialectParser
 
@@ -85,13 +85,13 @@ class DialectParser:
         raise ValueError
 
     def eat_blanks(self):
-        """ Pass over blank-lines, generally created by full-line comments. """
+        """Pass over blank-lines, generally created by full-line comments."""
         while self.nxt and self.nxt.tp == Tokens.NEWLINE:
             self.advance()
 
     def eat_rest_of_statement(self):
-        """ Ignore Tokens from `self.cur` to the end of the current statement. 
-        Largely used for error purposes. """
+        """Ignore Tokens from `self.cur` to the end of the current statement.
+        Largely used for error purposes."""
         while self.nxt and not self.match(Tokens.NEWLINE):
             self.advance()
 
@@ -112,7 +112,7 @@ class DialectParser:
         self.nxt0 = None
 
     def rewind(self):
-        """ Rewind by one Token. Error if already in rewinding state. """
+        """Rewind by one Token. Error if already in rewinding state."""
         if self.rewinding:
             self.fail()
         self.rewinding = True
@@ -122,19 +122,19 @@ class DialectParser:
         self.prev = None
 
     def peek(self) -> Optional[Token]:
-        """ Peek at the next Token """
+        """Peek at the next Token"""
         return self.nxt
 
     def match(self, tp: str) -> bool:
-        """ Boolean indication of whether our next token matches `tp` """
+        """Boolean indication of whether our next token matches `tp`"""
         if self.nxt and tp == self.nxt.tp:
             self.advance()
             return True
         return False
 
     def match_any(self, *tp: List[str]) -> Optional[Tokens]:
-        """ Boolean indication of whether our next token matche *any* provided `tp`. 
-        Returns the matching `Tokens` (type) if successful, or `None` otherwise. """
+        """Boolean indication of whether our next token matche *any* provided `tp`.
+        Returns the matching `Tokens` (type) if successful, or `None` otherwise."""
         if not self.nxt:
             return None
         for t in tp:
@@ -144,21 +144,21 @@ class DialectParser:
         return None
 
     def expect(self, *tp: List[str]) -> None:
-        """ Assertion that our next token matches `tp`. 
-        Note this advances if successful, effectively discarding `self.cur`. """
+        """Assertion that our next token matches `tp`.
+        Note this advances if successful, effectively discarding `self.cur`."""
         if not self.match_any(*tp):
             self.fail(f"Invalid token: {self.nxt}, expecting one of {tp}")
 
     def expect_any(self, *tp: List[str]) -> Tokens:
-        """ Assertion that our next token matches one of `tp`, and return the one it was. """
+        """Assertion that our next token matches one of `tp`, and return the one it was."""
         rv = self.match_any(*tp)
         if rv is None:
             self.fail()
         return rv
 
     def parse(self, f=None) -> Any:
-        """ Perform parsing. Succeeds if top-level is parsable by function `f`.
-        Defaults to parsing `Expr`. """
+        """Perform parsing. Succeeds if top-level is parsable by function `f`.
+        Defaults to parsing `Expr`."""
         self.start()
         func = f if f else self.parse_expr
         self.root = func()
@@ -167,7 +167,7 @@ class DialectParser:
         return self.root
 
     def parse_subckt_start(self) -> StartSubckt:
-        """ module_name ( port1 port2 port2 ) p1=param1 p2=param2 ... """
+        """module_name ( port1 port2 port2 ) p1=param1 p2=param2 ..."""
 
         # Boolean indication of the `inline`-ness
         _inline = self.match(Tokens.INLINE)
@@ -197,18 +197,18 @@ class DialectParser:
         return StartSubckt(name=name, ports=ports, params=params)
 
     def parse_ident(self) -> Ident:
-        """ Parse an Identifier """
+        """Parse an Identifier"""
         self.expect(Tokens.IDENT)
         return Ident(self.cur.val)
 
     def parse_node_ident(self) -> Ident:
-        """ Parse a Node-Identifier - either a var-name-style Ident or an Int. """
+        """Parse a Node-Identifier - either a var-name-style Ident or an Int."""
         self.expect(Tokens.IDENT, Tokens.INT)
         return Ident(str(self.cur.val))
 
     def parse_list(self, parse_item, term, *, MAXN=10_000) -> List[Any]:
-        """ Parse a whitespace-separated list of entries possible by function `parse_item`. 
-        Terminated in the condition `term(self)`. """
+        """Parse a whitespace-separated list of entries possible by function `parse_item`.
+        Terminated in the condition `term(self)`."""
         rv = []
         for i in range(MAXN, -1, -1):
             if term(self):
@@ -219,20 +219,20 @@ class DialectParser:
         return rv
 
     def parse_node_list(self, term, *, MAXN=10_000) -> List[Ident]:
-        """ Parse a Node-Identifier (Ident or Int) list, 
-        terminated in the condition `term(self)`. """
+        """Parse a Node-Identifier (Ident or Int) list,
+        terminated in the condition `term(self)`."""
         return self.parse_list(self.parse_node_ident, term=term, MAXN=MAXN)
 
     def parse_ident_list(self, term, *, MAXN=10_000) -> List[Ident]:
-        """ Parse list of Identifiers """
+        """Parse list of Identifiers"""
         return self.parse_list(self.parse_ident, term=term, MAXN=MAXN)
 
     def parse_expr_list(self, term, *, MAXN=10_000) -> List[Expr]:
-        """ Parse list of Expressions """
+        """Parse list of Expressions"""
         return self.parse_list(self.parse_expr, term=term, MAXN=MAXN)
 
     def parse_primitive(self) -> Primitive:
-        """ Parse a Spice-format primitive instance """
+        """Parse a Spice-format primitive instance"""
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
         args = []
@@ -264,7 +264,7 @@ class DialectParser:
         return Primitive(name=name, args=args, kwargs=params)
 
     def parse_instance(self) -> Instance:
-        """ iname (? port1 port2 port2 )? mname p1=param1 p2=param2 ... """
+        """iname (? port1 port2 port2 )? mname p1=param1 p2=param2 ..."""
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
         conns = []
@@ -277,7 +277,7 @@ class DialectParser:
 
             # Grab the module name
             self.expect(Tokens.IDENT)
-            module = Ident(self.cur.val)
+            module = Ref(ident=Ident(self.cur.val))
 
         else:  # No-parens case
             conns = self.parse_node_list(_endargs_startkwargs)
@@ -288,7 +288,7 @@ class DialectParser:
                     self.fail()
                 conns.pop()
             # Grab the module name, at this point errantly in the `conns` list
-            module = conns.pop()  # FIXME: check this matched `Ident` and not `Int`
+            module = Ref(ident=conns.pop())
 
         # Parse parameters
         params = self.parse_instance_param_values()
@@ -315,7 +315,7 @@ class DialectParser:
         return ParamDecl(val.name, val.val)
 
     def parse_param_declarations(self) -> List[ParamDecl]:
-        """ Parse a set of parameter declarations """
+        """Parse a set of parameter declarations"""
         term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
         MAXN = 100_000
         # Believe it or not, we do find real netlists with more than `parse_list`'s default (10k) parameters
@@ -323,7 +323,7 @@ class DialectParser:
         return self.parse_list(self.parse_param_declaration, term=term, MAXN=MAXN)
 
     def parse_param_values(self) -> List[ParamVal]:
-        """ ( ident = expr )* """
+        """( ident = expr )*"""
         term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
         return self.parse_list(self.parse_param_val, term=term)
 
@@ -337,7 +337,7 @@ class DialectParser:
         return EndSubckt(name)
 
     def parse_expr0(self) -> Expr:
-        """ expr0b ( (<|>|<=|>=) expr0b )? """
+        """expr0b ( (<|>|<=|>=) expr0b )?"""
         e = self.parse_expr0b()
         if self.match_any(Tokens.GT, Tokens.LT, Tokens.GE, Tokens.LE):
             tp = self.parse_binary_operator(self.cur.tp)
@@ -346,7 +346,7 @@ class DialectParser:
         return e
 
     def parse_expr0b(self) -> Expr:
-        """ expr1 ( (+|-) expr0 )? """
+        """expr1 ( (+|-) expr0 )?"""
         e = self.parse_expr1()
         if self.match_any(Tokens.PLUS, Tokens.MINUS):
             tp = self.parse_binary_operator(self.cur.tp)
@@ -355,7 +355,7 @@ class DialectParser:
         return e
 
     def parse_expr1(self) -> Expr:
-        """ expr2 ( (*|/) expr1 )? """
+        """expr2 ( (*|/) expr1 )?"""
         e = self.parse_expr2()
         if self.match_any(Tokens.STAR, Tokens.SLASH):
             tp = self.parse_binary_operator(self.cur.tp)
@@ -364,7 +364,7 @@ class DialectParser:
         return e
 
     def parse_expr2(self) -> Expr:
-        """ expr3 ( (**|^) expr2 )? """
+        """expr3 ( (**|^) expr2 )?"""
         e = self.parse_expr2b()
         if self.match_any(Tokens.DUBSTAR, Tokens.CARET):
             tp = self.parse_binary_operator(self.cur.tp)
@@ -372,7 +372,7 @@ class DialectParser:
         return e
 
     def parse_expr2b(self) -> Expr:
-        """ expr3 ( ? expr0 : expr0 )? """
+        """expr3 ( ? expr0 : expr0 )?"""
         e = self.parse_expr3()
         if self.match(Tokens.QUESTION):
             if_true = self.parse_expr0()
@@ -382,16 +382,16 @@ class DialectParser:
         return e
 
     def parse_expr3(self) -> Expr:
-        """ ( expr ) or term """
+        """( expr ) or term"""
         if self.match(Tokens.LPAREN):
             e = self.parse_expr()
             self.expect(Tokens.RPAREN)
             return e
         return self.parse_term()
 
-    def parse_term(self) -> Union[Int, Float, Ident]:
-        """ Parse a terminal value, or raise an Exception 
-        ( number | ident | unary(term) | call ) """
+    def parse_term(self) -> Union[Int, Float, Ref]:
+        """Parse a terminal value, or raise an Exception
+        ( number | ident | unary(term) | call )"""
         if self.match(Tokens.METRIC_NUM):
             return MetricNum(self.cur.val)
         if self.match(Tokens.FLOAT):
@@ -402,7 +402,7 @@ class DialectParser:
             tp = self.parse_unary_operator(self.cur.tp)
             return UnaryOp(tp=tp, targ=self.parse_term())
         if self.match(Tokens.IDENT):
-            name = Ident(self.cur.val)
+            ref = Ref(ident=Ident(self.cur.val))
             if self.match(Tokens.LPAREN):  # Function-call syntax
                 # Parse arguments
                 args = []
@@ -417,13 +417,13 @@ class DialectParser:
                     self.expect(Tokens.COMMA)
                 if i <= 0:  # Check the time-out
                     self.fail()
-                return Call(func=name, args=args)
-            return name
+                return Call(func=ref, args=args)
+            return ref
         self.fail(f"Unexpected token while parsing expression-term: {self.cur}")
 
     @staticmethod
     def parse_unary_operator(tp: Tokens) -> UnaryOperator:
-        """ Parse `tp` to a unary operator """
+        """Parse `tp` to a unary operator"""
         the_map = {
             Tokens.PLUS: UnaryOperator.PLUS,
             Tokens.MINUS: UnaryOperator.NEG,
@@ -434,7 +434,7 @@ class DialectParser:
 
     @staticmethod
     def parse_binary_operator(tp: Tokens) -> BinaryOperator:
-        """ Parse `tp` to a binary operator """
+        """Parse `tp` to a binary operator"""
         the_map = {
             Tokens.PLUS: BinaryOperator.ADD,
             Tokens.MINUS: BinaryOperator.SUB,
@@ -452,15 +452,16 @@ class DialectParser:
         raise ValueError(f"Invalid Token {tp} when expecting binary operator")
 
     def is_comment(self, tok: Token) -> bool:
-        """ Boolean indication of whether `tok` begins a Comment """
-        return tok.tp in (Tokens.DUBSLASH, Tokens.DOLLAR,) or (
-            self.are_stars_comments_now() and tok.tp in (Tokens.DUBSTAR, Tokens.STAR)
-        )
+        """Boolean indication of whether `tok` begins a Comment"""
+        return tok.tp in (
+            Tokens.DUBSLASH,
+            Tokens.DOLLAR,
+        ) or (self.are_stars_comments_now() and tok.tp in (Tokens.DUBSTAR, Tokens.STAR))
 
     def parse_quote_string(self) -> str:
-        """ Parse a quoted string, ignoring internal token-types, 
-        solely appending them to a return-value string. 
-        FIXME: check for newlines, EOF, etc. """
+        """Parse a quoted string, ignoring internal token-types,
+        solely appending them to a return-value string.
+        FIXME: check for newlines, EOF, etc."""
 
         # Get the opening quote, which may be single or double
         tp = self.expect_any(Tokens.DUBQUOTE, Tokens.TICK)
@@ -472,15 +473,15 @@ class DialectParser:
         return rv
 
     def fail(self, *args, **kwargs) -> None:
-        """ Failure Debug Helper. 
-        Primarily designed to capture state, and potentially break-points, when things go wrong. """
+        """Failure Debug Helper.
+        Primarily designed to capture state, and potentially break-points, when things go wrong."""
         print(self)
         NetlistParseError.throw(*args, **kwargs)
 
     def is_expression_starter(self, tp: Tokens) -> Optional[Tuple[Tokens, Tokens]]:
-        """ Indicates whether token-type `tp` is a valid expression-*starting* Token-type. 
-        If not, returns None. 
-        If so, returns a tuple of the start token-type and its paired expression-ending token-type. """
+        """Indicates whether token-type `tp` is a valid expression-*starting* Token-type.
+        If not, returns None.
+        If so, returns a tuple of the start token-type and its paired expression-ending token-type."""
 
         pairs = {  # FIXME: specialize this by dialect
             Tokens.TICK: Tokens.TICK,
@@ -492,8 +493,8 @@ class DialectParser:
         return tp, pairs[tp]
 
     def parse_expr(self) -> Expr:
-        """ Parse an Expression 
-        expr0 | 'expr0' | {expr0} """
+        """Parse an Expression
+        expr0 | 'expr0' | {expr0}"""
         # Note: moves into our `EXPR` state require a `peek`/`expect` combo,
         # otherwise we can mis-understand multiplication vs comment.
         from .base import ParserState
@@ -515,27 +516,26 @@ class DialectParser:
     """ Abstract Methods """
 
     def are_stars_comments_now(self) -> bool:
-        """ Boolean indication of whether Tokens.STAR and DUBSTAR should 
-        currently be lexed as a comment. """
+        """Boolean indication of whether Tokens.STAR and DUBSTAR should
+        currently be lexed as a comment."""
         raise NotImplementedError
 
     def parse_statement(self) -> Optional[Statement]:
-        """ Statement Parser 
-        Dispatches to type-specific parsers based on prioritized set of matching rules. 
-        Returns `None` at end. """
+        """Statement Parser
+        Dispatches to type-specific parsers based on prioritized set of matching rules.
+        Returns `None` at end."""
         raise NotImplementedError
 
     def parse_model(self) -> Expr:
-        """ Parse a Model Declaration """
+        """Parse a Model Declaration"""
         raise NotImplementedError
 
 
 def _endargs_startkwargs(s):
-    """ A fairly intractible test of where argument-lists end and key-valued keyword args being. 
-    e.g. 
+    """A fairly intractible test of where argument-lists end and key-valued keyword args being.
+    e.g.
     a b c d=1 e=2 ... => d
     a b c \n  => \n
     a b c EOF => EOF
     """
     return s.nxt is None or s.nxt.tp == Tokens.NEWLINE or s.nxt.tp == Tokens.EQUALS
-

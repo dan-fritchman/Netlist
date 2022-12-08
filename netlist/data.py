@@ -10,23 +10,24 @@ primarily in the form of dataclasses.
 # Std-Lib Imports
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Union, List, Tuple
+from typing import Optional, Union, List, Tuple, Generic, TypeVar
 
 # PyPi Imports
 from pydantic.dataclasses import dataclass
+from pydantic.generics import GenericModel
 
 
 class NetlistParseError(Exception):
-    """ Netlist Parse Error """
+    """Netlist Parse Error"""
 
     @staticmethod
     def throw(*args, **kwargs):
-        """ Exception-raising debug wrapper. Breakpoint to catch `NetlistParseError`s. """
+        """Exception-raising debug wrapper. Breakpoint to catch `NetlistParseError`s."""
         raise NetlistParseError(*args, **kwargs)
 
 
 class NetlistDialects(Enum):
-    """ Enumerated, Supported Netlist Dialects """
+    """Enumerated, Supported Netlist Dialects"""
 
     SPECTRE = "spectre"
     SPECTRE_SPICE = "spectre_spice"
@@ -38,8 +39,8 @@ class NetlistDialects(Enum):
 
     @staticmethod
     def get(spec: "NetlistFormatSpec") -> "NetlistDialects":
-        """ Get the format specified by `spec`, in either enum or string terms. 
-        Only does real work in the case when `spec` is a string, otherwise returns it unchanged. """
+        """Get the format specified by `spec`, in either enum or string terms.
+        Only does real work in the case when `spec` is a string, otherwise returns it unchanged."""
         if isinstance(spec, (NetlistDialects, str)):
             return NetlistDialects(spec)
         raise TypeError
@@ -50,7 +51,7 @@ NetlistFormatSpec = Union[NetlistDialects, str]
 
 
 def to_json(arg) -> str:
-    """ Dump any `pydantic.dataclass` or simple combination thereof to JSON string. """
+    """Dump any `pydantic.dataclass` or simple combination thereof to JSON string."""
     import json
     from pydantic.json import pydantic_encoder
 
@@ -59,7 +60,7 @@ def to_json(arg) -> str:
 
 @dataclass
 class SourceInfo:
-    """ Parser Source Information """
+    """Parser Source Information"""
 
     line: int  # Source-File Line Number
     dialect: "NetlistDialects"  # Netlist Dialect
@@ -71,7 +72,7 @@ datatypes = [SourceInfo]
 
 
 def datatype(cls: type) -> type:
-    """ Register a class as a datatype. """
+    """Register a class as a datatype."""
 
     # Add an `Optional[SourceInfo]` field to the class, with a default value of `None`.
     # Creates the `__annotations__` field if it does not already exist.
@@ -90,22 +91,45 @@ def datatype(cls: type) -> type:
 
 @datatype
 class Ident:
-    """ Identifier """
+    """Identifier"""
 
     name: str
 
 
 @datatype
-class HierPath:
-    """ Hierarchical Path Identifier """
+class ExternalRef:
+    """# External Reference
+    Name-based reference to something outside the netlist-program."""
 
-    path: List[Ident]
+    ident: Ident  # Identifier
+    # types: List[RefType] # List of types which this can validly refer to
+
+
+# Generic type of "the thing that a `Ref` refers to"
+Referent = TypeVar("Referent")
+
+
+class Ref(GenericModel, Generic[Referent]):
+    """# Reference to another Netlist object
+    Intially an identifier, then in later stages resolved to a generic `Referent`."""
+
+    # Referred-to identifier
+    ident: Ident
+    # Resolved referent, or `None` if unresolved.
+    resolved: Optional[Union[Referent, ExternalRef]] = None
+
+
+@datatype
+class HierPath:
+    """Hierarchical Path Identifier"""
+
+    path: List[Ident]  # FIXME: Ref?
 
 
 @datatype
 class ParamDecl:
-    """ Parameter Declaration 
-    Includes Optional Distribution Information """
+    """Parameter Declaration
+    Includes Optional Distribution Information"""
 
     name: Ident
     default: Optional["Expr"]
@@ -114,50 +138,23 @@ class ParamDecl:
 
 @datatype
 class ParamDecls:
-    """ Parameter Declarations, 
-    as via the `param` keywords. """
+    """Parameter Declarations,
+    as via the `param` keywords."""
 
     params: List[ParamDecl]
 
 
 @datatype
 class ParamVal:
-    """ Parameter Value-Set """
+    """Parameter Value-Set"""
 
     name: Ident
     val: "Expr"
 
 
 @datatype
-class Instance:
-    """ Subckt / Module Instance """
-
-    name: Ident  # Instance Name
-    module: Ident  # Module / Subcircuit Name
-
-    # Connections, either by-position or by-name
-    conns: Union[List[Ident], List[Tuple[Ident, Ident]]]
-    params: List[ParamVal]  # Parameter Values
-
-
-@datatype
-class Primitive:
-    """ 
-    Primitive Instance 
-    
-    Note at parsing-time, before models are sorted out, 
-    it is not always clear what is a port, model name, and parameter value. 
-    Primitives instead store positional and keyword arguments `args` and `kwargs`. 
-    """
-
-    name: Ident
-    args: List["Expr"]
-    kwargs: List[ParamVal]
-
-
-@datatype
 class Options:
-    """ Simulation Options """
+    """Simulation Options"""
 
     name: Optional[Ident]  # Option Name. FIXME: could this be removed
     vals: List[ParamVal]  # List of name: value pairs
@@ -165,7 +162,7 @@ class Options:
 
 @datatype
 class StartSubckt:
-    """ Start of a Subckt / Module Definition """
+    """Start of a Subckt / Module Definition"""
 
     name: Ident  # Module/ Subcircuit Name
     ports: List[Ident]  # Port List
@@ -174,14 +171,14 @@ class StartSubckt:
 
 @datatype
 class EndSubckt:
-    """ End of a Subckt / Module Definition """
+    """End of a Subckt / Module Definition"""
 
     name: Optional[Ident]
 
 
 @datatype
 class SubcktDef:
-    """ Sub-Circuit / Module Definition """
+    """Sub-Circuit / Module Definition"""
 
     name: Ident  # Module/ Subcircuit Name
     ports: List[Ident]  # Port List
@@ -191,7 +188,7 @@ class SubcktDef:
 
 @datatype
 class ModelDef:
-    """ Model Definition """
+    """Model Definition"""
 
     name: Ident  # Model Name
     mtype: Ident  # Model Type
@@ -201,7 +198,7 @@ class ModelDef:
 
 @datatype
 class ModelVariant:
-    """ Model Variant within a `ModelFamily` """
+    """Model Variant within a `ModelFamily`"""
 
     model: Ident  # Model Family Name
     variant: Ident  # Variant Name
@@ -212,60 +209,91 @@ class ModelVariant:
 
 @datatype
 class ModelFamily:
-    """ Model Family 
-    A set of related, identically named models, generally separated by limiting parameters such as {lmin, lmax} or {wmin, wmax}. """
+    """Model Family
+    A set of related, identically named models, generally separated by limiting parameters such as {lmin, lmax} or {wmin, wmax}."""
 
     name: Ident  # Model Family Name
     mtype: Ident  # Model Type
     variants: List[ModelVariant]  # Variants
 
 
+# The primary `Model` type-union includes both single-variant and multi-variant versions
+Model = Union[ModelDef, ModelFamily]
+
+
+@datatype
+class Instance:
+    """Subckt / Module Instance"""
+
+    name: Ident  # Instance Name
+    module: Ref[Union[SubcktDef, Model]]  # Module/ Subcircuit Reference
+
+    # Connections, either by-position or by-name
+    conns: Union[List[Ident], List[Tuple[Ident, Ident]]]
+    params: List[ParamVal]  # Parameter Values
+
+
+@datatype
+class Primitive:
+    """
+    Primitive Instance
+
+    Note at parsing-time, before models are sorted out,
+    it is not always clear what is a port, model name, and parameter value.
+    Primitives instead store positional and keyword arguments `args` and `kwargs`.
+    """
+
+    name: Ident
+    args: List["Expr"]
+    kwargs: List[ParamVal]
+
+
 @datatype
 class Include:
-    """ Include (a File) Statement """
+    """Include (a File) Statement"""
 
     path: Path
 
 
 @datatype
 class AhdlInclude:
-    """ Analog HDL Include (a File) Statement """
+    """Analog HDL Include (a File) Statement"""
 
     path: Path
 
 
 @datatype
 class StartLib:
-    """ Start of a `Library`"""
+    """Start of a `Library`"""
 
     name: Ident
 
 
 @datatype
 class EndLib:
-    """ End of a `Library`"""
+    """End of a `Library`"""
 
     name: Optional[Ident]
 
 
 @datatype
 class StartLibSection:
-    """ Start of a `LibrarySection` """
+    """Start of a `LibrarySection`"""
 
     name: Ident
 
 
 @datatype
 class EndLibSection:
-    """ End of a `LibrarySection` """
+    """End of a `LibrarySection`"""
 
     name: Ident
 
 
 @datatype
 class LibSection:
-    """ Library Section 
-    A named section of a library, commonly incorporated with a `UseLib` or similar. """
+    """Library Section
+    A named section of a library, commonly incorporated with a `UseLib` or similar."""
 
     name: Ident  # Section Name
     entries: List["Entry"]  # Entry List
@@ -273,9 +301,9 @@ class LibSection:
 
 @datatype
 class Library:
-    """ Library, as Generated by the Spice `.lib` Definition Card
-    Includes a list of named `LibSection`s which can be included by their string-name, 
-    as common for "corner" inclusions e.g. `.inc "mylib.sp" "tt"`  """
+    """Library, as Generated by the Spice `.lib` Definition Card
+    Includes a list of named `LibSection`s which can be included by their string-name,
+    as common for "corner" inclusions e.g. `.inc "mylib.sp" "tt"`"""
 
     name: Ident  # Library Name
     sections: List[LibSection]  # Library Sections
@@ -283,7 +311,7 @@ class Library:
 
 @datatype
 class UseLib:
-    """ Use a Library """
+    """Use a Library"""
 
     path: Path  # Library File Path
     section: Ident  # Section Name
@@ -291,14 +319,14 @@ class UseLib:
 
 @datatype
 class End:
-    """ Empty class represents `.end` Statements """
+    """Empty class represents `.end` Statements"""
 
     ...
 
 
 @datatype
 class Variation:
-    """ Single-Parameter Variation Declaration """
+    """Single-Parameter Variation Declaration"""
 
     name: Ident  # Parameter Name
     dist: str  # Distribution Name/Type
@@ -307,7 +335,7 @@ class Variation:
 
 @datatype
 class StatisticsBlock:
-    """ Statistical Descriptions """
+    """Statistical Descriptions"""
 
     process: Optional[List[Variation]]
     mismatch: Optional[List[Variation]]
@@ -315,14 +343,14 @@ class StatisticsBlock:
 
 @datatype
 class Unknown:
-    """ Unknown Netlist Statement. Stored as an un-parsed string. """
+    """Unknown Netlist Statement. Stored as an un-parsed string."""
 
     txt: str
 
 
 @datatype
 class DialectChange:
-    """ Netlist Dialect Changes, e.g. `simulator lang=xyz` """
+    """Netlist Dialect Changes, e.g. `simulator lang=xyz`"""
 
     dialect: str
 
@@ -348,7 +376,11 @@ FlatStatement = Union[
 # Statements which indicate the beginning and end of hierarchical elements,
 # and ultimately disappear into the structured AST
 DelimStatement = Union[
-    StartLib, EndLib, StartLibSection, EndLibSection, End,
+    StartLib,
+    EndLib,
+    StartLibSection,
+    EndLibSection,
+    End,
 ]
 
 # Statements
@@ -368,12 +400,12 @@ class SourceFile:
 
 @datatype
 class Program:
-    """ 
-    # Multi-File "Netlist Program" 
-    The name of this type is a bit misleading, but borrowed from more typical compiler-parsers. 
-    Spice-culture generally lacks a term for "the totality of a simulator invocation input", 
-    or even "a pile of source-files to be used together". 
-    So, `Program` it is. 
+    """
+    # Multi-File "Netlist Program"
+    The name of this type is a bit misleading, but borrowed from more typical compiler-parsers.
+    Spice-culture generally lacks a term for "the totality of a simulator invocation input",
+    or even "a pile of source-files to be used together".
+    So, `Program` it is.
     """
 
     files: List[SourceFile]  # List of Source-File Contents
@@ -381,46 +413,28 @@ class Program:
 
 @datatype
 class Int:
-    """ Integer Number """
+    """Integer Number"""
 
     val: int
 
 
 @datatype
 class Float:
-    """ Floating Point Number """
+    """Floating Point Number"""
 
     val: float
 
 
 @datatype
 class MetricNum:
-    """ Number with Metric Suffix """
+    """Number with Metric Suffix"""
 
     val: str  # No conversion, just stored as string for now
 
 
 @datatype
-class Call:
-    """ 
-    Function Call Node 
-
-    All valid parameter-generating function calls return a single value, 
-    usable in a mathematical expression (`Expr`) context. 
-    All arguments are provided by position and stored in a List. 
-    All arguments must also be resolvable as mathematical expressions. 
-    
-    Examples:
-    `sqrt(2)` => Call(func=Ident("sqrt"), args=([Int(2)]),)
-    """
-
-    func: Ident  # Function Name
-    args: List["Expr"]  # Arguments List
-
-
-@datatype
 class TypedArg:
-    """ Typed Function Argument """
+    """Typed Function Argument"""
 
     tp: Ident  # Argument Type
     name: Ident  # Argument Name
@@ -428,7 +442,7 @@ class TypedArg:
 
 @datatype
 class Return:
-    """ Function Return Node """
+    """Function Return Node"""
 
     val: "Expr"
 
@@ -440,7 +454,7 @@ FuncStatement = Union[Return]
 
 @datatype
 class FunctionDef:
-    """ Function Definition """
+    """Function Definition"""
 
     name: Ident  # Function Name
     rtype: Ident  # Return Type
@@ -448,15 +462,27 @@ class FunctionDef:
     stmts: List[FuncStatement]  # Function Body/ Statements
 
 
-# Expression Union
-# Everything which can be used as a mathematical expression,
-# and ultimately resolves to a scalar value at runtime.
-Expr = Union["UnaryOp", "BinaryOp", "TernOp", Int, Float, MetricNum, Ident, Call]
+@datatype
+class Call:
+    """
+    Function Call Node
+
+    All valid parameter-generating function calls return a single value,
+    usable in a mathematical expression (`Expr`) context.
+    All arguments are provided by position and stored in a List.
+    All arguments must also be resolvable as mathematical expressions.
+
+    Examples:
+    `sqrt(2)` => Call(func=Ident("sqrt"), args=([Int(2)]),)
+    """
+
+    func: Ref[FunctionDef]  # Function Name
+    args: List["Expr"]  # Arguments List
 
 
 class UnaryOperator(Enum):
-    """ Enumerated, Supported Unary Operators 
-    Values generally equal their string-format equivalents. """
+    """Enumerated, Supported Unary Operators
+    Values generally equal their string-format equivalents."""
 
     PLUS = "+"
     NEG = "-"
@@ -464,15 +490,15 @@ class UnaryOperator(Enum):
 
 @datatype
 class UnaryOp:
-    """ Unary Operation """
+    """Unary Operation"""
 
     tp: UnaryOperator  # Operator Type
-    targ: Expr  # Target Expression
+    targ: "Expr"  # Target Expression
 
 
 class BinaryOperator(Enum):
-    """ Enumerated, Supported Binary Operators 
-    Values generally equal their string-format equivalents. """
+    """Enumerated, Supported Binary Operators
+    Values generally equal their string-format equivalents."""
 
     ADD = "+"
     SUB = "-"
@@ -487,20 +513,26 @@ class BinaryOperator(Enum):
 
 @datatype
 class BinaryOp:
-    """ Binary Operation """
+    """Binary Operation"""
 
     tp: BinaryOperator  # Enumerated Operator Type
-    left: Expr  # Left Operand Expression
-    right: Expr  # Right Operand Expression
+    left: "Expr"  # Left Operand Expression
+    right: "Expr"  # Right Operand Expression
 
 
 @datatype
 class TernOp:
-    """ Ternary Operation """
+    """Ternary Operation"""
 
-    cond: Expr  # Condition Expression
-    if_true: Expr  # Value if `cond` is True
-    if_false: Expr  # Value if `cond` is False
+    cond: "Expr"  # Condition Expression
+    if_true: "Expr"  # Value if `cond` is True
+    if_false: "Expr"  # Value if `cond` is False
+
+
+# Expression Union
+# Everything which can be used as a mathematical expression,
+# and ultimately resolves to a scalar value at runtime.
+Expr = Union[UnaryOp, BinaryOp, TernOp, Int, Float, MetricNum, Ref, Call]
 
 
 # Update all the forward type-references
@@ -516,7 +548,7 @@ __all__ = [tp.__name__ for tp in datatypes] + [
     "UnaryOperator",
     "Expr",
     "Entry",
+    "Ref",
     "Statement",
     "to_json",
 ]
-

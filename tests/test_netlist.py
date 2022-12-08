@@ -6,7 +6,26 @@
 from textwrap import dedent
 from io import StringIO
 
+# DUT Imports
 from netlist.data import BinaryOperator, UnaryOperator
+from netlist import SpectreDialectParser
+from netlist import Ident, ParamDecl, Int, Float, ModelVariant, ModelFamily, Ref
+from netlist import (
+    SpiceDialectParser,
+    BinaryOp,
+    Ident,
+)
+from netlist import (
+    SpectreDialectParser,
+    Int,
+    Float,
+    MetricNum,
+    UnaryOp,
+    BinaryOp,
+    Ident,
+    Call,
+    Ref,
+)
 
 
 def test_version():
@@ -16,15 +35,11 @@ def test_version():
 
 
 def test_spice_exprs():
-    from netlist import (
-        SpiceDialectParser,
-        BinaryOp,
-        Ident,
-    )
+    """Test parsing spice-format expressions"""
 
     def parse_expression(s: str) -> SpiceDialectParser:
-        """ Parse a string expression, including placing the parser in EXPR mode first, 
-        particularly so that elements like "*" are interpreted as multiplication. """
+        """Parse a string expression, including placing the parser in EXPR mode first,
+        particularly so that elements like "*" are interpreted as multiplication."""
         from netlist.dialects.base import ParserState
 
         parser = SpiceDialectParser.from_str(s)
@@ -33,24 +48,15 @@ def test_spice_exprs():
 
     p = parse_expression(" ' a + b ' ")  # SPICE-style ticked-expression
     assert p == BinaryOp(
-        tp=BinaryOperator.ADD, left=Ident(name="a"), right=Ident(name="b")
+        tp=BinaryOperator.ADD,
+        left=Ref(ident=Ident(name="a")),
+        right=Ref(ident=Ident(name="b")),
     )
 
 
 def test_spectre_exprs():
-    from netlist import (
-        SpectreDialectParser,
-        Int,
-        Float,
-        MetricNum,
-        UnaryOp,
-        BinaryOp,
-        Ident,
-        Call,
-    )
-
     def parse_expression(s: str) -> SpectreDialectParser:
-        """ Parse a string expression """
+        """Parse a string expression"""
         from netlist.dialects.base import ParserState
 
         parser = SpectreDialectParser.from_str(s)
@@ -80,9 +86,9 @@ def test_spectre_exprs():
     )
 
     p = parse_expression("a     ")
-    assert p == Ident("a")
+    assert p == Ref(ident=Ident("a"))
     p = parse_expression("   b + 1     ")
-    assert p == BinaryOp(BinaryOperator.ADD, Ident("b"), Int(1))
+    assert p == BinaryOp(BinaryOperator.ADD, Ref(ident=Ident("b")), Int(1))
 
     p = parse_expression("1e-3")
     assert p == Float(1e-3)
@@ -102,26 +108,33 @@ def test_spectre_exprs():
     p = parse_expression("r*l/w")
     assert p == BinaryOp(
         tp=BinaryOperator.MUL,
-        left=Ident(name="r"),
+        left=Ref(ident=Ident(name="r")),
         right=BinaryOp(
-            tp=BinaryOperator.DIV, left=Ident(name="l"), right=Ident(name="w")
+            tp=BinaryOperator.DIV,
+            left=Ref(ident=Ident(name="l")),
+            right=Ref(ident=Ident(name="w")),
         ),
     )
 
     p = parse_expression("(0.5f * p)")  # SPICE metric-suffixed number
     assert p == BinaryOp(
-        tp=BinaryOperator.MUL, left=MetricNum(val="0.5f"), right=Ident(name="p")
+        tp=BinaryOperator.MUL,
+        left=MetricNum(val="0.5f"),
+        right=Ref(ident=Ident(name="p")),
     )
 
     p = parse_expression(" a + func(b, c) ")  # Function call
     assert p == BinaryOp(
         tp=BinaryOperator.ADD,
-        left=Ident(name="a"),
-        right=Call(func=Ident(name="func"), args=[Ident(name="b"), Ident(name="c")]),
+        left=Ref(ident=Ident(name="a")),
+        right=Call(
+            func=Ref(ident=Ident(name="func")),
+            args=[Ref(ident=Ident(name="b")), Ref(ident=Ident(name="c"))],
+        ),
     )
 
     p = parse_expression(" - a ")  # Unary operator
-    assert p == UnaryOp(tp=UnaryOperator.NEG, targ=Ident(name="a"))
+    assert p == UnaryOp(tp=UnaryOperator.NEG, targ=Ref(ident=Ident(name="a")))
 
     p = parse_expression(" - + + - a ")  # Unary operator(s!)
     assert p == UnaryOp(
@@ -130,7 +143,7 @@ def test_spectre_exprs():
             tp=UnaryOperator.PLUS,
             targ=UnaryOp(
                 tp=UnaryOperator.PLUS,
-                targ=UnaryOp(tp=UnaryOperator.NEG, targ=Ident(name="a")),
+                targ=UnaryOp(tp=UnaryOperator.NEG, targ=Ref(ident=Ident(name="a"))),
             ),
         ),
     )
@@ -198,26 +211,26 @@ def test_primitive():
                             left=Float(val=0.5),
                             right=BinaryOp(
                                 tp=BinaryOperator.SUB,
-                                left=Ident(name="x"),
+                                left=Ref(ident=Ident(name="x")),
                                 right=BinaryOp(
                                     tp=BinaryOperator.MUL,
                                     left=Int(val=2),
-                                    right=Ident(name="y"),
+                                    right=Ref(ident=Ident(name="y")),
                                 ),
                             ),
                         ),
-                        right=Ident(name="z"),
+                        right=Ref(ident=Ident(name="z")),
                     ),
                     right=BinaryOp(
                         tp=BinaryOperator.MUL,
                         left=Int(val=2),
                         right=BinaryOp(
                             tp=BinaryOperator.SUB,
-                            left=Ident(name="a"),
+                            left=Ref(ident=Ident(name="a")),
                             right=BinaryOp(
                                 tp=BinaryOperator.MUL,
                                 left=Int(val=2),
-                                right=Ident(name="b"),
+                                right=Ref(ident=Ident(name="b")),
                             ),
                         ),
                     ),
@@ -230,17 +243,19 @@ def test_primitive():
 
 def test_instance():
     from netlist import SpectreDialectParser
-    from netlist import Ident, ParamVal, Int, Instance
+    from netlist import Ident, ParamVal, Int, Instance, Ref
 
-    p = SpectreDialectParser.from_str("xxx (d g s b) mymos l=11 w=global_w",)
+    p = SpectreDialectParser.from_str(
+        "xxx (d g s b) mymos l=11 w=global_w",
+    )
     i = p.parse(p.parse_instance)
     assert i == Instance(
         name=Ident(name="xxx"),
-        module=Ident(name="mymos"),
+        module=Ref(ident=Ident(name="mymos")),
         conns=[Ident(name="d"), Ident(name="g"), Ident(name="s"), Ident(name="b")],
         params=[
             ParamVal(name=Ident(name="l"), val=Int(val=11)),
-            ParamVal(name=Ident(name="w"), val=Ident(name="global_w")),
+            ParamVal(name=Ident(name="w"), val=Ref(ident=Ident(name="global_w"))),
         ],
     )
 
@@ -252,10 +267,10 @@ def test_instance():
 
 
 def test_instance_parens():
-    """ 
+    """
     Spectre has a fun behavior with dangling close-parens at the end of instance statements -
     it accepts as many as you care to provide.
-    
+
     So it will accept this is a valid instance:
     ```
     rsad 1 0 resistor r=1  )))))) // really, with all those parentheses
@@ -263,21 +278,21 @@ def test_instance_parens():
 
     The same close-paren behavior does not apply to parameter-declaration statements.
     It may apply to other types.
-    
-    You may ask, why should `netlist` inherit what is almost certainly a Spectre bug? 
-    Because, sadly, notable popular commercial netlists and models include some of these errant parentheses, 
-    and therefore only work *because* of the Spectre-bug. So, if we want to parse them, we need that bug too. 
+
+    You may ask, why should `netlist` inherit what is almost certainly a Spectre bug?
+    Because, sadly, notable popular commercial netlists and models include some of these errant parentheses,
+    and therefore only work *because* of the Spectre-bug. So, if we want to parse them, we need that bug too.
     """
 
     txt = "rsad 1 0 resistor r=1  ))))))"
     from netlist import SpectreDialectParser
-    from netlist import Ident, ParamVal, Int, Instance
+    from netlist import Ident, ParamVal, Int, Instance, Ref
 
     p = SpectreDialectParser.from_str(txt)
     i = p.parse(p.parse_instance)
     assert i == Instance(
         name=Ident(name="rsad"),
-        module=Ident(name="resistor"),
+        module=Ref(ident=Ident(name="resistor")),
         conns=[Ident(name="1"), Ident(name="0")],
         params=[ParamVal(name=Ident(name="r"), val=Int(val=1))],
     )
@@ -285,7 +300,7 @@ def test_instance_parens():
 
 def test_subckt_def():
     from netlist import SpectreDialectParser
-    from netlist import Ident, ParamDecl, Int, StartSubckt
+    from netlist import Ident, ParamDecl, Int, StartSubckt, Ref
 
     p = SpectreDialectParser.from_str("subckt mymos (d g s b) l=11 w=global_w")
     i = p.parse(p.parse_subckt_start)
@@ -295,7 +310,9 @@ def test_subckt_def():
         params=[
             ParamDecl(name=Ident(name="l"), default=Int(val=11), distr=None),
             ParamDecl(
-                name=Ident(name="w"), default=Ident(name="global_w"), distr=None,
+                name=Ident(name="w"),
+                default=Ref(ident=Ident(name="global_w")),
+                distr=None,
             ),
         ],
     )
@@ -327,9 +344,6 @@ def test_model_family():
         """
     )
 
-    from netlist import SpectreDialectParser
-    from netlist import Ident, ParamDecl, Int, Float, ModelVariant, ModelFamily
-
     p = SpectreDialectParser.from_str(txt)
     i = p.parse(p.parse_model)
     assert i == ModelFamily(
@@ -343,25 +357,39 @@ def test_model_family():
                 args=[],
                 params=[
                     ParamDecl(
-                        name=Ident(name="type"), default=Ident(name="n"), distr=None,
+                        name=Ident(name="type"),
+                        default=Ref(ident=Ident(name="n")),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="lmin"), default=Float(val=1.0), distr=None,
+                        name=Ident(name="lmin"),
+                        default=Float(val=1.0),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="lmax"), default=Float(val=2.0), distr=None,
+                        name=Ident(name="lmax"),
+                        default=Float(val=2.0),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="wmin"), default=Float(val=1.2), distr=None,
+                        name=Ident(name="wmin"),
+                        default=Float(val=1.2),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="wmax"), default=Float(val=1.4), distr=None,
+                        name=Ident(name="wmax"),
+                        default=Float(val=1.4),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="level"), default=Int(val=999), distr=None,
+                        name=Ident(name="level"),
+                        default=Int(val=999),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="tnom"), default=Int(val=30), distr=None,
+                        name=Ident(name="tnom"),
+                        default=Int(val=30),
+                        distr=None,
                     ),
                 ],
             ),
@@ -372,16 +400,32 @@ def test_model_family():
                 args=[],
                 params=[
                     ParamDecl(
-                        name=Ident(name="type"), default=Ident(name="n"), distr=None,
+                        name=Ident(name="type"),
+                        default=Ref(
+                            ident=Ident(name="n")
+                        ),  # FIXME: this is a "ref", but to a kinda behind-the-scenes "thing" `n`
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="version"), default=Float(val=3.2), distr=None,
+                        name=Ident(name="version"),
+                        default=Float(val=3.2),
+                        distr=None,
                     ),
                     ParamDecl(
-                        name=Ident(name="xj"), default=Float(val=1.2e-07), distr=None,
+                        name=Ident(name="xj"),
+                        default=Float(val=1.2e-07),
+                        distr=None,
                     ),
-                    ParamDecl(name=Ident(name="lln"), default=Int(val=1), distr=None,),
-                    ParamDecl(name=Ident(name="lwn"), default=Int(val=1), distr=None,),
+                    ParamDecl(
+                        name=Ident(name="lln"),
+                        default=Int(val=1),
+                        distr=None,
+                    ),
+                    ParamDecl(
+                        name=Ident(name="lwn"),
+                        default=Int(val=1),
+                        distr=None,
+                    ),
                 ],
             ),
         ],
@@ -389,8 +433,8 @@ def test_model_family():
 
 
 def test_spectre_midstream_comment():
-    """ Test for mid-stream full-line comments, which do not break up statements such as `model` 
-    from being line-continued. """
+    """Test for mid-stream full-line comments, which do not break up statements such as `model`
+    from being line-continued."""
 
     txt = dedent(
         """model whatever diode
@@ -442,7 +486,7 @@ def test_spice_include():
 
 
 def test_write1():
-    """ Test writing an empty netlist `Program` """
+    """Test writing an empty netlist `Program`"""
     from netlist import Program, SourceFile, netlist
 
     src = Program(files=[SourceFile(path="/", contents=[])])
@@ -450,7 +494,7 @@ def test_write1():
 
 
 def test_write2():
-    """ Test writing some actual content  """
+    """Test writing some actual content"""
     from netlist import (
         Program,
         SourceFile,
@@ -486,4 +530,3 @@ def test_write2():
         ]
     )
     netlist(src=src, dest=StringIO())
-
