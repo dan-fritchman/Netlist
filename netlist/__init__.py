@@ -11,6 +11,6 @@ from .data import *
 from .dialects import *
 from .write import *
 from .convert import convert, ConversionIO
-from .parse import parse_str, parse_files
+from .parse import parse_str, parse_files, ParseOptions
 from .ast_to_cst import ast_to_cst, has_external_refs, get_external_refs, Scope
 from .compile import compile
