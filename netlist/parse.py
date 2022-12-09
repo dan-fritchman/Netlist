@@ -313,8 +313,7 @@ class HierarchyCollector:
 
             if isinstance(stmt, StartSubckt):
                 s = self.collect_subckt(start=stmt)
-            elif isinstance(stmt, StartLib):
-                s = self.collect_lib(start=stmt)
+
             elif isinstance(stmt, StartLibSection):
                 s = self.collect_lib_section(start=stmt)
 
@@ -408,29 +407,3 @@ class HierarchyCollector:
             nodes = [ParamDecls(params)] + nodes
 
         return LibSectionDef(name=start.name, entries=nodes)
-
-    def collect_lib(self, start: StartLib) -> Library:
-        """Collect a library definition"""
-
-        # FIXME: is this really a thing? Or are we always collecting a `LibSectionDef` at a time?
-
-        sections = []
-        while True:
-            stmt = self.nxt()
-            if stmt is None:
-                break  # library-end on file-end
-
-            if isinstance(stmt, EndLib):
-                break  # done with this library
-            elif isinstance(stmt, EndLibSection):
-                # something went wrong; lib section ends without beginning
-                msg = "Invalid `EndLibSection` without `StartLibSection`"
-                self.fail(msg)
-            elif isinstance(stmt, StartLibSection):
-                s = self.collect_lib_section(start=stmt)
-                sections.append(s)
-            else:
-                msg = f"Invalid statement in library: {stmt}"
-                self.fail(msg)  # invalid type
-
-        return Library(name=start.name, sections=sections)

@@ -194,8 +194,12 @@ class Netlister:
             return self.write_statistics_block(entry)
 
         # Explicitly note these data-types as unsupported for writing
-        unsupported = (DialectChange, FunctionDef, Unknown, AhdlInclude, Library)
-        # FIXME: is writing `Library` even really a thing?
+        unsupported = (
+            DialectChange,
+            FunctionDef,
+            Unknown,
+            AhdlInclude,
+        )
         if isinstance(entry, unsupported):
             return self.fail(entry, f"Unsupported Entry: {entry}")
 

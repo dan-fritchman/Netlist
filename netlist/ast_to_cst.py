@@ -247,7 +247,6 @@ class ScopeCollector:
         UNSUPPORTED_AST_ENTRIES = (
             DialectChange,
             AhdlInclude,
-            Library,
         )
 
         # We collect any loose `ModelVariant`s into a `ModelFamily` here.
