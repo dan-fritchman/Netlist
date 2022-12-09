@@ -3,26 +3,32 @@
  
 """
 
-from textwrap import dedent
 from io import StringIO
+from textwrap import dedent
+from tempfile import NamedTemporaryFile
 
 # DUT Imports
 from netlist.data import BinaryOperator, UnaryOperator
-from netlist import SpectreDialectParser
-from netlist import Ident, ParamDecl, Int, Float, ModelVariant, ModelFamily, Ref
+from netlist import  ParamDecl,   ModelVariant, ModelFamily
 from netlist import (
+    parse_files,
+    parse_str,
+    netlist,
+    Program,
+    SourceFile,
+    Options,
+    ParamVal,
+    Ident,
+    MetricNum,
+    SourceInfo,
+    NetlistDialects,
     SpiceDialectParser,
     BinaryOp,
-    Ident,
-)
-from netlist import (
     SpectreDialectParser,
     Int,
     Float,
     MetricNum,
     UnaryOp,
-    BinaryOp,
-    Ident,
     Call,
     Ref,
 )
@@ -495,17 +501,6 @@ def test_write1():
 
 def test_write2():
     """Test writing some actual content"""
-    from netlist import (
-        Program,
-        SourceFile,
-        netlist,
-        Options,
-        ParamVal,
-        Ident,
-        MetricNum,
-        SourceInfo,
-        NetlistDialects,
-    )
 
     src = Program(
         files=[
@@ -530,3 +525,28 @@ def test_write2():
         ]
     )
     netlist(src=src, dest=StringIO())
+
+
+def test_nested_subckt_def():
+    """Test parsing nested sub-circuit definitions"""
+
+    txt = dedent(
+        """.subckt a 
+            .subckt b 
+                .subckt c
+                .ends
+                .subckt d 
+                .ends
+                xc c * Instance of `c`
+                xd d * Instance of `d`
+            .ends
+        .ends
+        """
+    )
+    ast = parse_str(txt)
+    assert isinstance(ast, Program)
+
+    from netlist.ast_to_cst import ast_to_cst, has_external_refs, get_external_refs
+
+    scope = ast_to_cst(ast)
+    assert not has_external_refs(scope)

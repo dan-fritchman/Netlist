@@ -6,6 +6,7 @@ import os, copy, codecs
 from enum import Enum
 from pathlib import Path
 from warnings import warn
+from tempfile import NamedTemporaryFile
 from typing import List, Tuple, Optional, Sequence, Union, Set
 from pydantic.dataclasses import dataclass
 
@@ -15,7 +16,7 @@ from .data import *
 
 
 class ErrorMode(Enum):
-    """ Enumerated Error-Response Strategies """
+    """Enumerated Error-Response Strategies"""
 
     RAISE = 0  # Raise any generated exceptions
     STORE = 1  # Store error-generating content in `Unknown` elements
@@ -23,22 +24,22 @@ class ErrorMode(Enum):
 
 @dataclass
 class ParseOptions:
-    """ Parse Options """
+    """Parse Options"""
 
     dialect: Optional[NetlistDialects] = None  # Initial netlist dialect
-    errormode: ErrorMode = ErrorMode.RAISE  # Error-handling mode, enumerated in `ErrorMode`
+    errormode: ErrorMode = ErrorMode.RAISE  # Error-handling mode
     recurse: bool = True  # Whether to recurse into dependent & included files
 
 
-def parse(
+def parse_files(
     src: Union[os.PathLike, Sequence[os.PathLike]],
     *,
     options: Optional[ParseOptions] = None,
 ) -> Program:
-    """ 
-    Primary netist-parsing entry point.  
-    Parse a multi-file netlist-`Program` starting at file or files `src`. 
-    Optional argument `options` sets all behavior laid out by the `ParseOptions` class. 
+    """
+    Primary netist-parsing entry point.
+    Parse a multi-file netlist-`Program` starting at file or files `src`.
+    Optional argument `options` sets all behavior laid out by the `ParseOptions` class.
     """
 
     if options is None:  # If not provided, create the default `ParseOptions`.
@@ -64,14 +65,33 @@ def parse(
     return p.program
 
 
+def parse_str(src: str, *, options: Optional[ParseOptions] = None) -> Program:
+    """Parse netlist content from a string"""
+
+    if options is None:
+        options = ParseOptions()
+    if options.dialect is None:
+        # Set "spectre-spice" as the default dialect
+        options.dialect = NetlistDialects.SPECTRE_SPICE
+
+    # Maybe a hack, maybe not, since so much of netlist-world revolves around files.
+    # We write `src` to a temporary file, and parse that.
+
+    f = NamedTemporaryFile()
+    f.write(bytes(src, "utf-8"))
+    f.seek(0)
+
+    return parse_files(src=[f.name], options=options)
+
+
 def default_dialect(path: os.PathLike) -> NetlistDialects:
-    """ 
-    Infer a default dialect from a file name, particularly its suffix. 
-    
-    For files of suffix `scs` this is straightforwardly set to SPECTRE. 
-    All other suffixes are less clear without knowing more context. 
-    They are set to the most flexible SPECTRE_SPICE, 
-    which generally uses SPICE-style syntax, but also includes dialect-changes. 
+    """
+    Infer a default dialect from a file name, particularly its suffix.
+
+    For files of suffix `scs` this is straightforwardly set to SPECTRE.
+    All other suffixes are less clear without knowing more context.
+    They are set to the most flexible SPECTRE_SPICE,
+    which generally uses SPICE-style syntax, but also includes dialect-changes.
     """
 
     p = Path(path).absolute()
@@ -83,10 +103,12 @@ def default_dialect(path: os.PathLike) -> NetlistDialects:
 
 
 class Parser:
-    """ Multi-File "Netlist Program" Parser """
+    """Multi-File "Netlist Program" Parser"""
 
     def __init__(
-        self, src: List[Path], options: ParseOptions,
+        self,
+        src: List[Path],
+        options: ParseOptions,
     ):
         self.options = options
         self.pending: List[Path] = [Path(s).absolute() for s in src]
@@ -98,15 +120,15 @@ class Parser:
         self.file_parser = None
 
     def parse(self) -> None:
-        """ Parse all specified input, including (potentially recursive) dependencies. """
+        """Parse all specified input, including (potentially recursive) dependencies."""
 
         while self.pending:
             sourcefile = self.parse_one()
             self.program.files.append(sourcefile)
 
     def parse_one(self) -> SourceFile:
-        """ Parse a single file, returning its resultant `SourceFile` tree. 
-        Note the result-value *is not* stored in `self.program`. """
+        """Parse a single file, returning its resultant `SourceFile` tree.
+        Note the result-value *is not* stored in `self.program`."""
 
         path = self.pending.pop()
 
@@ -134,7 +156,7 @@ class Parser:
         return sourcefile
 
     def recurse(self, path: Path, contents: List[Statement]):
-        """ Parse included-files in SourceFile `f` """
+        """Parse included-files in SourceFile `f`"""
         for s in contents:
             if isinstance(s, (Include, UseLib)):
                 # Differentiate absolute vs relative paths, relative to active source-file
@@ -167,18 +189,20 @@ class Parser:
                 # self.parse(incp)
 
     def entries(self):
-        """ Iterator of all parsed Entries """
+        """Iterator of all parsed Entries"""
         for f in self.program.files:
             for e in f.contents:
                 yield e
 
 
 class FileParser:
-    """ Single-File Parser 
-    Produces a flat list of Statement-Entries """
+    """Single-File Parser
+    Produces a flat list of Statement-Entries"""
 
     def __init__(
-        self, dialect: NetlistDialects, options: ParseOptions,
+        self,
+        dialect: NetlistDialects,
+        options: ParseOptions,
     ):
         self.dialect = dialect
         self.dialect_parser = None
@@ -186,8 +210,8 @@ class FileParser:
         self.line_num = 1
 
     def notify(self, reason: DialectChange):
-        """ Notification from dialect-parser that something's up. 
-        E.g. for dialect changes via `simulator lang` statements. """
+        """Notification from dialect-parser that something's up.
+        E.g. for dialect changes via `simulator lang` statements."""
 
         s = reason.dialect.lower().strip()
         if s == "spectre":
@@ -201,7 +225,7 @@ class FileParser:
         self.dialect_parser = dcls.from_parser(self.dialect_parser)
 
     def _parse_file(self) -> List[Statement]:
-        """ Parse the (open) file-pointer at `self.fp` """
+        """Parse the (open) file-pointer at `self.fp`"""
 
         # Create our iterator over file-lines, and core dialect-parser
         lines = iter(self.fp.readline, None)
@@ -213,7 +237,8 @@ class FileParser:
         s = True
         while s:  # Main loop over statements
             si = SourceInfo(
-                line=self.dialect_parser.line_num, dialect=self.dialect_parser.enum,
+                line=self.dialect_parser.line_num,
+                dialect=self.dialect_parser.enum,
             )
 
             try:  # Catch errors in primary parsing routines
@@ -234,7 +259,7 @@ class FileParser:
         return stmts
 
     def parse(self, path: Path) -> Tuple[Path, List[Statement]]:
-        """ Parse the netlist `SourceFile` at `path`. """
+        """Parse the netlist `SourceFile` at `path`."""
         with codecs.open(path, "r", encoding="utf-8", errors="replace") as f:
             self.path = path
             self.fp = f
@@ -243,29 +268,29 @@ class FileParser:
 
 
 def hierarchicalize(p: Path, stmts: List[Statement]) -> SourceFile:
-    """ Convert a flat list of Statements into a hierarchical tree """
+    """Convert a flat list of Statements into a hierarchical tree"""
     nodes = HierarchyCollector(stmts).collect_source_file()
     return SourceFile(p, nodes)
 
 
 class HierarchyCollector:
-    """ 
+    """
     Hierarchy-collector to create multi-statement tree structure, e.g.:
     * Libraries and Sections
-    * (Potentially nested) sub-circuit definitions. 
+    * (Potentially nested) sub-circuit definitions.
     """
 
     def __init__(self, stmts: List[Statement]):
         self.stmts = iter(stmts)
 
     def nxt(self) -> Optional[Statement]:
-        """ Get our next `Statement`, or `None` if exhausted """
+        """Get our next `Statement`, or `None` if exhausted"""
         return next(self.stmts, None)
 
     def collect_source_file(self) -> List[Entry]:
-        """ Primary Entry Point. 
-        Transform a list of flat file-entries to a hierarchical tree of file-nodes. 
-        While the return-type is `List[Entry]`, these lists are designed as the content of a `SourceFile`. """
+        """Primary Entry Point.
+        Transform a list of flat file-entries to a hierarchical tree of file-nodes.
+        While the return-type is `List[Entry]`, these lists are designed as the content of a `SourceFile`."""
 
         nodes = []
         params = []  # Collect parameter-declarations into one
@@ -302,7 +327,7 @@ class HierarchyCollector:
         return nodes
 
     def collect_subckt(self, start: StartSubckt) -> SubcktDef:
-        """ Collect a sub-circuit definition """
+        """Collect a sub-circuit definition"""
 
         nodes = []
         params = copy.copy(start.params)
@@ -337,7 +362,7 @@ class HierarchyCollector:
         )
 
     def collect_lib_section(self, start: StartLibSection) -> LibSection:
-        """ Collect a library section """
+        """Collect a library section"""
 
         nodes = []
         params = []  # Collect parameter-declarations into one
@@ -374,7 +399,7 @@ class HierarchyCollector:
         return LibSection(name=start.name, entries=nodes)
 
     def collect_lib(self, start: StartLib) -> Library:
-        """ Collect a library definition """
+        """Collect a library definition"""
 
         # FIXME: is this really a thing? Or are we always collecting a `LibSection` at a time?
 
@@ -398,4 +423,3 @@ class HierarchyCollector:
                 self.fail(msg)  # invalid type
 
         return Library(name=start.name, sections=sections)
-

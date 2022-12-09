@@ -10,6 +10,7 @@ primarily in the form of dataclasses.
 # Std-Lib Imports
 from enum import Enum
 from pathlib import Path
+from dataclasses import field
 from typing import Optional, Union, List, Tuple, Generic, TypeVar
 
 # PyPi Imports
@@ -96,13 +97,26 @@ class Ident:
     name: str
 
 
+class RefType(Enum):
+    """External Reference Types Enumeration
+    Store on each `ExternalRef` to note which types would be valid in context."""
+
+    SUBCKT = "SUBCKT"  # Sub-circuit definition
+    MODEL = "MODEL"  # Model definition
+    PARAM = "PARAM"  # Parameter reference
+    FUNCTION = "FUNCTION"  # Function definition
+    FILEPATH = "FILEPATH"  # File-system path, e.g. in `Include`s not parsed
+
+
 @datatype
 class ExternalRef:
     """# External Reference
     Name-based reference to something outside the netlist-program."""
 
-    ident: Ident  # Identifier
-    # types: List[RefType] # List of types which this can validly refer to
+    # Referred-to identifier
+    ident: Ident
+    # List of types which this can validly refer to
+    types: List[RefType] = field(default_factory=list)
 
 
 # Generic type of "the thing that a `Ref` refers to"
@@ -549,6 +563,9 @@ __all__ = [tp.__name__ for tp in datatypes] + [
     "Expr",
     "Entry",
     "Ref",
+    "RefType",
+    "ExternalRef",
+    "Model",
     "Statement",
     "to_json",
 ]
