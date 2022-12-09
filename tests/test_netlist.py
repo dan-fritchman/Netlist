@@ -4,18 +4,23 @@
 """
 
 from io import StringIO
+from pathlib import Path
 from textwrap import dedent
-from tempfile import NamedTemporaryFile
 
 # DUT Imports
-from netlist.data import BinaryOperator, UnaryOperator
-from netlist import  ParamDecl,   ModelVariant, ModelFamily
+import netlist
 from netlist import (
+    __version__,
     parse_files,
     parse_str,
-    netlist,
+    netlist as write_netlist,
     Program,
     SourceFile,
+    ParamDecl,
+    ModelVariant,
+    ModelFamily,
+    BinaryOperator,
+    UnaryOperator,
     Options,
     ParamVal,
     Ident,
@@ -35,8 +40,6 @@ from netlist import (
 
 
 def test_version():
-    from netlist import __version__
-
     assert __version__ == "0.1.0"
 
 
@@ -483,7 +486,7 @@ def test_parse_capital_param():
 
 
 def test_spice_include():
-    from netlist import SpectreSpiceDialectParser, Include, Path
+    from netlist import SpectreSpiceDialectParser, Include
 
     txt = '.include "/path/to/file" \n'
     p = SpectreSpiceDialectParser.from_str(txt)
@@ -493,10 +496,9 @@ def test_spice_include():
 
 def test_write1():
     """Test writing an empty netlist `Program`"""
-    from netlist import Program, SourceFile, netlist
 
     src = Program(files=[SourceFile(path="/", contents=[])])
-    netlist(src=src, dest=StringIO())
+    write_netlist(src=src, dest=StringIO())
 
 
 def test_write2():
@@ -524,11 +526,12 @@ def test_write2():
             )
         ]
     )
-    netlist(src=src, dest=StringIO())
+    write_netlist(src=src, dest=StringIO())
 
 
 def test_nested_subckt_def():
     """Test parsing nested sub-circuit definitions"""
+    from netlist import has_external_refs, get_external_refs, Scope
 
     txt = dedent(
         """.subckt a 
@@ -543,10 +546,8 @@ def test_nested_subckt_def():
         .ends
         """
     )
-    ast = parse_str(txt)
-    assert isinstance(ast, Program)
 
-    from netlist.ast_to_cst import ast_to_cst, has_external_refs, get_external_refs
-
-    scope = ast_to_cst(ast)
+    scope = netlist.compile(txt)
+    assert isinstance(scope, Scope)
+    assert get_external_refs(scope) == []
     assert not has_external_refs(scope)

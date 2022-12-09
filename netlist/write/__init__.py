@@ -21,7 +21,7 @@ from .spice import (
 
 
 def writer(fmt: NetlistDialects = NetlistDialects.XYCE) -> type:
-    """ Get the writer-class paired with the netlist-format. """
+    """Get the writer-class paired with the netlist-format."""
     if fmt == NetlistDialects.XYCE:
         return XyceNetlister
     raise ValueError
@@ -48,9 +48,9 @@ def netlist(
     fmt: NetlistFormatSpec = "xyce",
     errormode: ErrorMode = ErrorMode.RAISE,
 ) -> None:
-    """ Write netlist-`Program` `src` to destination `dest`. 
+    """Write netlist-`Program` `src` to destination `dest`.
 
-    Example usages: 
+    Example usages:
     ```python
     netlist(pkg, dest=open('mynetlist.v', 'w'), fmt='verilog')
     ```
@@ -63,11 +63,11 @@ def netlist(
     netlist(pkg, dest=sys.stdout, fmt='spice')
     ```
 
-    Primary argument `src` must be a `Program`.  
-    Destination `dest` may be anything that supports the `typing.IO` bundle, 
-    commonly including open file-handles. `StringIO` is particularly helpful 
-    for producing a netlist in an in-memory string.  
-    Format-specifier `fmt` may be any of the `NetlistDialectsSpec` enumerated values 
+    Primary argument `src` must be a `Program`.
+    Destination `dest` may be anything that supports the `typing.IO` bundle,
+    commonly including open file-handles. `StringIO` is particularly helpful
+    for producing a netlist in an in-memory string.
+    Format-specifier `fmt` may be any of the `NetlistDialectsSpec` enumerated values
     or their string equivalents.
     """
     fmt_enum = NetlistDialects.get(fmt)

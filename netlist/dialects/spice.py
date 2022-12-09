@@ -9,18 +9,18 @@ from .base import DialectParser, Tokens
 
 
 class SpiceDialectParser(DialectParser):
-    """ Family of SPICE-like syntax dialects, complete with 
-    * Dot-based "control cards", e.g. `.subckt`, `.ac`, `.end`, 
+    """Family of SPICE-like syntax dialects, complete with
+    * Dot-based "control cards", e.g. `.subckt`, `.ac`, `.end`,
     * Prefix-based primitive element instances
-    Further specializations are made for HSPICE, NGSPICE, etc. 
+    Further specializations are made for HSPICE, NGSPICE, etc.
     """
 
     enum = NetlistDialects.SPICE
 
     def parse_statement(self) -> Optional[Statement]:
-        """ Statement Parser 
-        Dispatches to type-specific parsers based on prioritized set of matching rules. 
-        Returns `None` at end. """
+        """Statement Parser
+        Dispatches to type-specific parsers based on prioritized set of matching rules.
+        Returns `None` at end."""
 
         self.eat_blanks()
         pk = self.peek()
@@ -53,7 +53,7 @@ class SpiceDialectParser(DialectParser):
         self.fail(f"Unexpected token to begin statement: {pk}")
 
     def parse_include(self) -> Include:
-        """ Parse an Include Statement """
+        """Parse an Include Statement"""
         self.expect(Tokens.INC, Tokens.INCLUDE)
         if self.peek().tp in (Tokens.TICK, Tokens.DUBQUOTE):
             path = self.parse_quote_string()
@@ -68,13 +68,13 @@ class SpiceDialectParser(DialectParser):
         return Include(path)
 
     def parse_param_statement(self) -> ParamDecls:
-        """ Parse a Parameter-Declaration Statement """
+        """Parse a Parameter-Declaration Statement"""
         self.expect(Tokens.PARAM)
         vals = self.parse_param_declarations()  # NEWLINE is captured inside
         return ParamDecls(vals)
 
     def parse_model(self) -> Union[ModelDef, ModelVariant]:
-        """ Parse SPICE .model Statements """
+        """Parse SPICE .model Statements"""
         from .base import _endargs_startkwargs
 
         self.expect(Tokens.MODEL)
@@ -129,4 +129,3 @@ class NgSpiceDialectParser(SpiceDialectParser):
 class HspiceDialectParser(SpiceDialectParser):
     # FIXME: actually specialize!
     enum = NetlistDialects.HSPICE
-

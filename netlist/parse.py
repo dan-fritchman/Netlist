@@ -31,16 +31,27 @@ class ParseOptions:
     recurse: bool = True  # Whether to recurse into dependent & included files
 
 
-def parse_files(
-    src: Union[os.PathLike, Sequence[os.PathLike]],
+def parse(
+    src: Union[str, os.PathLike, Sequence[os.PathLike]],
     *,
     options: Optional[ParseOptions] = None,
 ) -> Program:
     """
     Primary netist-parsing entry point.
-    Parse a multi-file netlist-`Program` starting at file or files `src`.
+    Parse a potentially multi-file netlist-`Program` starting at `src`.
     Optional argument `options` sets all behavior laid out by the `ParseOptions` class.
     """
+    if isinstance(src, str):
+        return parse_str(src, options=options)
+    return parse_files(src, options=options)
+
+
+def parse_files(
+    src: Union[os.PathLike, Sequence[os.PathLike]],
+    *,
+    options: Optional[ParseOptions] = None,
+) -> Program:
+    """Parse netlist content from file or files `src`."""
 
     if options is None:  # If not provided, create the default `ParseOptions`.
         options = ParseOptions()
@@ -148,7 +159,7 @@ class Parser:
 
         # Recursively descend into files it depends upon
         if self.options.recurse:
-            file_stmts = [e for e in stmts if isinstance(e, (Include, UseLib))]
+            file_stmts = [e for e in stmts if isinstance(e, (Include, UseLibSection))]
             self.recurse(path, file_stmts)
 
         # Form into a scope-hierarchical tree, and add it to our result-`Program`
@@ -158,7 +169,7 @@ class Parser:
     def recurse(self, path: Path, contents: List[Statement]):
         """Parse included-files in SourceFile `f`"""
         for s in contents:
-            if isinstance(s, (Include, UseLib)):
+            if isinstance(s, (Include, UseLibSection)):
                 # Differentiate absolute vs relative paths, relative to active source-file
                 incp = s.path if s.path.is_absolute() else path.parent / s.path
                 incp = incp.resolve()
@@ -361,7 +372,7 @@ class HierarchyCollector:
             name=start.name, ports=start.ports, params=params, entries=nodes
         )
 
-    def collect_lib_section(self, start: StartLibSection) -> LibSection:
+    def collect_lib_section(self, start: StartLibSection) -> LibSectionDef:
         """Collect a library section"""
 
         nodes = []
@@ -396,12 +407,12 @@ class HierarchyCollector:
             # This tends to be the most interprable for eventual netlist formats.
             nodes = [ParamDecls(params)] + nodes
 
-        return LibSection(name=start.name, entries=nodes)
+        return LibSectionDef(name=start.name, entries=nodes)
 
     def collect_lib(self, start: StartLib) -> Library:
         """Collect a library definition"""
 
-        # FIXME: is this really a thing? Or are we always collecting a `LibSection` at a time?
+        # FIXME: is this really a thing? Or are we always collecting a `LibSectionDef` at a time?
 
         sections = []
         while True:

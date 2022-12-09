@@ -139,7 +139,7 @@ class Scope:
     # This merged `NoRedefDict` ensures there are non Instances and Primitives with the same names.
     all_instances: NoRedefDict[Union[Instance, Primitive]] = _f()
     # Library Section Definitions
-    sections: NoRedefDict[LibSection] = _f()
+    sections: NoRedefDict[LibSectionDef] = _f()
     # Entries with no keys, not referable-to by other entries
     others: List[Unreferable] = field(default_factory=list)
     # External References
@@ -270,7 +270,7 @@ class ScopeCollector:
                 # And add the entry to the current scope
                 self.scope.subckts.set(entry.name.name, entry)
 
-            elif isinstance(entry, LibSection):
+            elif isinstance(entry, LibSectionDef):
                 # Create a child scope
                 self.push_scope(
                     stype=ScopeType.LIB_SECTION, name=entry.section.name.name
@@ -283,7 +283,7 @@ class ScopeCollector:
                 self.scope.sections.set(entry.name.name, entry)
 
             # Compound entries, adding on to the current scope
-            elif isinstance(entry, (Include, UseLib)):
+            elif isinstance(entry, (Include, UseLibSection)):
                 # Roll a `section` of library `entry` into the current scope
                 libfile: Optional[SourceFile] = self.paths_to_sourcefiles.get(
                     entry.path, None
@@ -298,12 +298,12 @@ class ScopeCollector:
                     # Include the whole file-contents into the current scope
                     self.collect_source_file(libfile)
 
-                else:  # isinstance(entry, UseLib)
+                else:  # isinstance(entry, UseLibSection)
                     # File found, now find section `entry.section.name`
-                    section_list: List[LibSection] = [
-                        e for e in libfile.entries if isinstance(e, LibSection)
+                    section_list: List[LibSectionDef] = [
+                        e for e in libfile.entries if isinstance(e, LibSectionDef)
                     ]
-                    section_map: Dict[str, LibSection] = {
+                    section_map: Dict[str, LibSectionDef] = {
                         s.name.name: s for s in section_list
                     }
                     if entry.section.name not in section_map:
@@ -480,7 +480,7 @@ class RefResolver:
         # Expr = Union[UnaryOp, BinaryOp, TernOp, Int, Float, MetricNum, Ref, Call]
 
         if isinstance(expr, Int, Float, MetricNum):
-            return  # Literals. Nothing to resolve. 
+            return  # Literals. Nothing to resolve.
 
         if isinstance(expr, Ref):
             return self.resolve_expr_ref(expr, scope)

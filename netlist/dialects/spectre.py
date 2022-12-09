@@ -11,12 +11,12 @@ from .spice import DialectParser, SpiceDialectParser
 
 
 class SpectreMixin:
-    """ Spectre-stuff to be mixed-in, 
-    primarily related to the capacity for `DialectChanges` 
-    via a `simulator lang` statement. """
+    """Spectre-stuff to be mixed-in,
+    primarily related to the capacity for `DialectChanges`
+    via a `simulator lang` statement."""
 
     def parse_dialect_change(self) -> Optional[DialectChange]:
-        """ Parse a DialectChange. Leaves its trailing NEWLINE to be parsed by a (likely new) DialectParser. """
+        """Parse a DialectChange. Leaves its trailing NEWLINE to be parsed by a (likely new) DialectParser."""
 
         self.expect(Tokens.SIMULATOR)
         self.expect(Tokens.LANG)
@@ -34,15 +34,15 @@ class SpectreMixin:
 
 
 class SpectreSpiceDialectParser(SpectreMixin, SpiceDialectParser):
-    """ Spice-Style Syntax, as Interpreted by Spectre. 
+    """Spice-Style Syntax, as Interpreted by Spectre.
 
     Primarily differs from the base SpiceDialect in its capacity for
-    `simulator lang` statements which produce `DialectChanges`. """
+    `simulator lang` statements which produce `DialectChanges`."""
 
     enum = NetlistDialects.SPECTRE_SPICE
 
     def parse_statement(self) -> Optional[Statement]:
-        """ Mix-in the `simulator lang` DialectChange Statments """
+        """Mix-in the `simulator lang` DialectChange Statments"""
         self.eat_blanks()
         pk = self.peek()
         if pk and pk.tp == Tokens.SIMULATOR:
@@ -51,15 +51,15 @@ class SpectreSpiceDialectParser(SpectreMixin, SpiceDialectParser):
 
 
 class SpectreDialectParser(SpectreMixin, DialectParser):
-    """ Spectre-Language Dialect. 
-    Probably more of a separate language really, but it fits our Dialect paradigm well enough. """
+    """Spectre-Language Dialect.
+    Probably more of a separate language really, but it fits our Dialect paradigm well enough."""
 
     enum = NetlistDialects.SPECTRE
 
     def parse_statement(self) -> Optional[Statement]:
-        """ Statement Parser 
-        Dispatches to type-specific parsers based on prioritized set of matching rules. 
-        Returns `None` at end. """
+        """Statement Parser
+        Dispatches to type-specific parsers based on prioritized set of matching rules.
+        Returns `None` at end."""
 
         self.eat_blanks()
         pk = self.peek()
@@ -91,11 +91,11 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         self.fail()
 
     def parse_named(self):
-        """ Parse an identifier-named statement. 
+        """Parse an identifier-named statement.
         Instances, Options, and Analyses fall into this category,
-        by beginning with their name, then their type-keyword. 
-        The general method is to read one token ahead, then rewind 
-        before dispatching to more detailed parsing methods. """
+        by beginning with their name, then their type-keyword.
+        The general method is to read one token ahead, then rewind
+        before dispatching to more detailed parsing methods."""
         self.expect(Tokens.IDENT)
         if self.nxt is None:
             self.fail()
@@ -109,7 +109,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         self.fail()
 
     def parse_model(self) -> Union[ModelDef, ModelFamily]:
-        """ Parse a Model statement """
+        """Parse a Model statement"""
         self.expect(Tokens.MODEL)
         self.expect(Tokens.IDENT)
         mname = Ident(self.cur.val)
@@ -132,7 +132,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         return ModelDef(mname, mtype, [], params)
 
     def parse_param_statement(self) -> ParamDecls:
-        """ Parse a Parameter-Declaration Statement """
+        """Parse a Parameter-Declaration Statement"""
         from .base import _endargs_startkwargs
 
         self.expect(Tokens.PARAMETERS)
@@ -148,13 +148,13 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         return ParamDecls(args + vals)
 
     def parse_variations(self) -> List[Variation]:
-        """ Parse a list of variation-statements, of the form
-        `{ 
-            vary param1 dist=distname std=stdval 
-            vary param2 dist=distname std=stdval 
-        }\n` 
-        Consumes the both opening and closing brackets, 
-        and the (required) newline following the closing bracket. """
+        """Parse a list of variation-statements, of the form
+        `{
+            vary param1 dist=distname std=stdval
+            vary param2 dist=distname std=stdval
+        }\n`
+        Consumes the both opening and closing brackets,
+        and the (required) newline following the closing bracket."""
         self.expect(Tokens.LBRACKET)
         self.expect(Tokens.NEWLINE)
         vars = []
@@ -192,7 +192,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         return vars
 
     def parse_statistics_block(self) -> StatisticsBlock:
-        """ Parse the `statistics` block """
+        """Parse the `statistics` block"""
 
         self.expect(Tokens.STATS)
         self.expect(Tokens.LBRACKET)
@@ -218,7 +218,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         return StatisticsBlock(process=process, mismatch=mismatch)
 
     def parse_ahdl(self):
-        """ Parse an `ahdl_include` statement """
+        """Parse an `ahdl_include` statement"""
         self.expect(Tokens.AHDL)
         path = self.parse_quote_string()
         rv = AhdlInclude(path)
@@ -226,8 +226,8 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         return rv
 
     def parse_instance_param_values(self) -> List[ParamVal]:
-        """ Parse a list of instance parameter-values, 
-        including the fun-fact that Spectre allows arbitrary dangling closing parens. """
+        """Parse a list of instance parameter-values,
+        including the fun-fact that Spectre allows arbitrary dangling closing parens."""
         term = (
             lambda s: s.nxt is None or s.match(Tokens.NEWLINE) or s.match(Tokens.RPAREN)
         )
@@ -273,8 +273,8 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         vals = self.parse_param_values()
         return Options(name=name, vals=vals)
 
-    def parse_include(self) -> Union[Include, UseLib]:
-        """ Parse an Include Statement """
+    def parse_include(self) -> Union[Include, UseLibSection]:
+        """Parse an Include Statement"""
         self.expect(Tokens.INCLUDE)
         path = self.parse_quote_string()
         if self.match(Tokens.NEWLINE):  # Non-sectioned `Include`
@@ -284,10 +284,10 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         self.expect(Tokens.EQUALS)
         self.expect(Tokens.IDENT)
         section = Ident(self.cur.val)
-        return UseLib(path, section)
+        return UseLibSection(path, section)
 
     def parse_function_def(self):
-        """ Yes, Spectre does have function definitions! 
+        """Yes, Spectre does have function definitions!
         Syntax: `rtype name (argtype argname, argtype argname) {
             statements;
             return rval;

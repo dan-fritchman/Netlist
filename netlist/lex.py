@@ -90,7 +90,10 @@ _keywords = dict(
     RETURN=r"return",
     DEV_GAUSS=r"dev\/gauss",  # Perhaps there are more "dev/{x}" to be added; gauss is the known one for now.
 )
-_patterns2 = dict(IDENT=r"[A-Za-z_][A-Za-z0-9_]*", ERROR=r"[\s\S]",)
+_patterns2 = dict(
+    IDENT=r"[A-Za-z_][A-Za-z0-9_]*",
+    ERROR=r"[\s\S]",
+)
 # Given each token its name as a key in the overall regex
 tokens = {key: rf"(?P<{key}>{val})" for key, val in _patterns1.items()}
 for key, val in _keywords.items():
@@ -107,15 +110,15 @@ Tokens = type("Tokens", (object,), {k: k for k in tokens.keys()})
 
 @dataclass
 class Token:
-    """ Lexer Token 
-    Includes type-annotation (as a string), and the token's text value. """
+    """Lexer Token
+    Includes type-annotation (as a string), and the token's text value."""
 
     tp: str
     val: str
 
 
 class Lexer:
-    """ # Netlist Lexer """
+    """# Netlist Lexer"""
 
     def __init__(self, lines: Iterable[str]):
         self.parser = None
@@ -126,7 +129,7 @@ class Lexer:
         self.toks = iter(pat.scanner(self.line).match, None)
 
     def nxt(self) -> Optional[Token]:
-        """ Get our next Token, pulling a new line if necessary. """
+        """Get our next Token, pulling a new line if necessary."""
         m = next(self.toks, None)
         if m is None:  # Grab a new line
             self.line = next(self.lines, None)
@@ -140,8 +143,8 @@ class Lexer:
         return Token(m.lastgroup, m.group())
 
     def eat_idle(self, token) -> Optional[Token]:
-        """ Consume whitespace and comments, returning the next (potential) action-token. 
-        Does not handle line-continuations. """
+        """Consume whitespace and comments, returning the next (potential) action-token.
+        Does not handle line-continuations."""
         while token and token.tp == Tokens.WHITE:
             token = self.nxt()
         if token and self.parser.is_comment(token):
@@ -150,7 +153,7 @@ class Lexer:
         return token
 
     def lex(self):
-        """ Create an iterator over pattern-matches """
+        """Create an iterator over pattern-matches"""
         token = self.nxt()
         while token:  # Iterate over token-matches
 
@@ -163,7 +166,10 @@ class Lexer:
 
                 # Loop until a non-blank-line, non-comment, non-continuation token
                 token = self.eat_idle(self.nxt())
-                while token and token.tp in (Tokens.NEWLINE, Tokens.WHITE,):
+                while token and token.tp in (
+                    Tokens.NEWLINE,
+                    Tokens.WHITE,
+                ):
                     token = self.eat_idle(self.nxt())
 
                 if token and token.tp == Tokens.PLUS:
@@ -178,4 +184,3 @@ class Lexer:
             self.lexed_nonwhite_on_this_line = True
             yield token
             token = self.nxt()
-

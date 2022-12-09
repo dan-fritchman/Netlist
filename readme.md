@@ -22,15 +22,15 @@ The `netlist` package is designed to support the most popular dialects.
 Enumerated, supported dialects are listed by the `netlist.NetlistDialects` enumeration.
 Support as of this writing includes:
 
-| Dialect              | Parsing | Writing |
-| -------------------- | ------- | ------- |
-| "Generic" Spice (\*) | [x]     | [ ]     |
-| Hspice               | [x]     | [ ]     |
-| Ngspice              | [ ]     | [ ]     |
-| CDL                  | [ ]     | [ ]     |
-| Xyce                 | [ ]     | [x]     |
-| Spectre              | [x]     | [ ]     |
-| Spectre-Spice (\*)   | [x]     | [ ]     |
+| Dialect              | Parsing            | Writing     |
+| -------------------- | ------------------ | ----------- |
+| "Generic" Spice\*    | :white_check_mark: |             |
+| Hspice               | :white_check_mark: |             |
+| Ngspice              |                    |             |
+| CDL                  |                    |             |
+| Xyce                 |                    | :white_check_mark: |
+| Spectre              | :white_check_mark: |             |
+| Spectre-Spice\*      | :white_check_mark: |             |
 
 Notes:
 
