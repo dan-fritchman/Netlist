@@ -23,7 +23,7 @@ from .spice import (
 
 
 def writer(fmt: NetlistDialects = NetlistDialects.XYCE) -> type:
-    """ Get the writer-class paired with the netlist-format. """
+    """Get the writer-class paired with the netlist-format."""
     if fmt == NetlistDialects.XYCE:
         return XyceNetlister
     raise ValueError
@@ -46,16 +46,24 @@ def writer(fmt: NetlistDialects = NetlistDialects.XYCE) -> type:
 
 @dataclass
 class WriteOptions:
-    """ Netlist Writing Options """
+    """Netlist Writing Options"""
 
-    fmt: NetlistDialects = NetlistDialects.XYCE  # Target format, in enumerated or string form
-    errormode: ErrorMode = ErrorMode.RAISE  # Error-handling mode, enumerated in `ErrorMode`
+    fmt: NetlistDialects = (
+        NetlistDialects.XYCE
+    )  # Target format, in enumerated or string form
+    errormode: ErrorMode = (
+        ErrorMode.RAISE
+    )  # Error-handling mode, enumerated in `ErrorMode`
 
 
-def netlist(src: Program, dest: IO, options: Optional[WriteOptions] = None,) -> None:
-    """ Write netlist-`Program` `src` to destination `dest`. 
+def netlist(
+    src: Program,
+    dest: IO,
+    options: Optional[WriteOptions] = None,
+) -> None:
+    """Write netlist-`Program` `src` to destination `dest`.
 
-    Example usages: 
+    Example usages:
     ```python
     netlist(pkg, dest=open('mynetlist.v', 'w'), fmt='verilog')
     ```
@@ -68,13 +76,13 @@ def netlist(src: Program, dest: IO, options: Optional[WriteOptions] = None,) -> 
     netlist(pkg, dest=sys.stdout, fmt='spice')
     ```
 
-    Primary argument `src` must be a `Program`.  
-    Destination `dest` may be anything that supports the `typing.IO` bundle, 
-    commonly including open file-handles. `StringIO` is particularly helpful 
-    for producing a netlist in an in-memory string.  
-    
-    Optional `WriteOptions` argument `options` sets the target format, error-handling strategies, 
-    and any further optional settings. 
+    Primary argument `src` must be a `Program`.
+    Destination `dest` may be anything that supports the `typing.IO` bundle,
+    commonly including open file-handles. `StringIO` is particularly helpful
+    for producing a netlist in an in-memory string.
+
+    Optional `WriteOptions` argument `options` sets the target format, error-handling strategies,
+    and any further optional settings.
     """
     if options is None:
         # Create the default options

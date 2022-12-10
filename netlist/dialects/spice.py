@@ -4,7 +4,7 @@
 from typing import Optional, Union
 
 # Local Imports
-from ..data import * 
+from ..data import *
 from .base import DialectParser, Tokens
 
 
@@ -157,9 +157,7 @@ class SpiceDialectParser(DialectParser):
         else:  # Single ModelDef
             mname = self.parse_ident()
             mtype = self.parse_ident()
-            partial = lambda args_and_params: ModelDef(
-                mname, mtype, *args_and_params
-            )
+            partial = lambda args_and_params: ModelDef(mname, mtype, *args_and_params)
 
         # Get to some work shared among the two: parsing positional args and by-keyword params
         args = self.parse_ident_list(_endargs_startkwargs)
@@ -219,9 +217,7 @@ class SpiceDialectParser(DialectParser):
         self.expect(Tokens.TICK)
         self.expect(Tokens.NEWLINE)
 
-        return FunctionDef(
-            name=name, rtype=ArgType.UNKNOWN, args=args, stmts=[ret]
-        )
+        return FunctionDef(name=name, rtype=ArgType.UNKNOWN, args=args, stmts=[ret])
 
     def are_stars_comments_now(self) -> bool:
         from .base import ParserState
