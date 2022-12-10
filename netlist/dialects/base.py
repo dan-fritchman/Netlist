@@ -153,7 +153,7 @@ class DialectParser:
         """Assertion that our next token matches one of `tp`, and return the one it was."""
         rv = self.match_any(*tp)
         if rv is None:
-            self.fail()
+            self.fail(f"Invalid token: {self.nxt}, expecting one of {tp}")
         return rv
 
     def parse(self, f=None) -> Any:
@@ -326,6 +326,22 @@ class DialectParser:
         """( ident = expr )*"""
         term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
         return self.parse_list(self.parse_param_val, term=term)
+
+    def parse_option_values(self) -> List[OptionVal]:
+        """Parse a list of `OptionVal`s, which can be expressions or strings."""
+        term = lambda s: s.nxt is None or s.match(Tokens.NEWLINE)
+        return self.parse_list(self.parse_option, term=term)
+
+    def parse_option(self) -> Option:
+        """Parse an `Option` name: `OptionVal` pair"""
+        name = self.parse_ident()
+        self.expect(Tokens.EQUALS)
+        if self.peek().tp in (Tokens.TICK, Tokens.DUBQUOTE):
+            txt = self.parse_quote_string()
+            val = QuotedString(txt)
+        else:
+            val = self.parse_expr()
+        return Option(name, val)
 
     def parse_end_sub(self):
         self.expect(Tokens.ENDS)
@@ -513,6 +529,16 @@ class DialectParser:
         self.expect(pair[1])
         return e
 
+    def parse_protect(self) -> StartProtectedSection:
+        self.expect_any(Tokens.PROT, Tokens.PROTECT)
+        self.expect(Tokens.NEWLINE)
+        return StartProtectedSection()
+
+    def parse_unprotect(self) -> EndProtectedSection:
+        self.expect_any(Tokens.UNPROT, Tokens.UNPROTECT)
+        self.expect(Tokens.NEWLINE)
+        return EndProtectedSection()
+
     """ Abstract Methods """
 
     def are_stars_comments_now(self) -> bool:
@@ -537,5 +563,11 @@ def _endargs_startkwargs(s):
     a b c d=1 e=2 ... => d
     a b c \n  => \n
     a b c EOF => EOF
+    a b c (d=1 e=2) ... => (
     """
-    return s.nxt is None or s.nxt.tp == Tokens.NEWLINE or s.nxt.tp == Tokens.EQUALS
+    return (
+        s.nxt is None
+        or s.nxt.tp == Tokens.NEWLINE
+        or s.nxt.tp == Tokens.EQUALS
+        or s.nxt.tp == Tokens.LPAREN
+    )

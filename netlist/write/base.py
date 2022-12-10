@@ -15,22 +15,22 @@ from ..data import *
 
 
 class ErrorMode(Enum):
-    """Enumerated Error-Response Strategies"""
+    """ Enumerated Error-Response Strategies """
 
-    RAISE = 0  # Raise any generated exceptions
-    COMMENT = 1  # Write errant entries as commments instead
+    RAISE = "raise"  # Raise any generated exceptions
+    COMMENT = "comment"  # Write errant entries as commments instead
 
 
 class ExpressionState(Enum):
-    """Enumerated Expression States
-    Indicates within the writer whether it is amid an arithmetic expression."""
+    """ Enumerated Expression States 
+    Indicates within the writer whether it is amid an arithmetic expression. """
 
     PROGRAM = auto()
     EXPR = auto()
 
 
 class SpicePrefix(Enum):
-    """Enumerated Spice Primitives and their Instance-Name Prefixes"""
+    """ Enumerated Spice Primitives and their Instance-Name Prefixes """
 
     # Sub-circits, either from `Module`s or `ExternalModule`s
     SUBCKT = "x"
@@ -56,17 +56,17 @@ class SpicePrefix(Enum):
 
 @dataclass
 class Indent:
-    """
-    # Indentation Helper
-
-    Supports in-place addition and subtraction of indentation levels, e.g. via
+    """ 
+    # Indentation Helper 
+    
+    Supports in-place addition and subtraction of indentation levels, e.g. via 
     ```python
     indent = Indent()
     indent += 1 # Adds one "tab", or indentation level
     indent += 1 # Adds another
     indent -= 1 # Drops back by one
     ```
-    The current indentation-string is available via the `state` attribute.
+    The current indentation-string is available via the `state` attribute. 
     Writers using such an indenter will likely be of the form:
     ```python
     dest.write(f"{indent.state}{content}")
@@ -84,13 +84,13 @@ class Indent:
         self.state = self.chars * self.num
 
     def __iadd__(self, other: int) -> None:
-        """In-place add, i.e. `indent += 1`"""
+        """ In-place add, i.e. `indent += 1` """
         self.num += other
         self.state = self.chars * self.num
         return self
 
     def __isub__(self, other: int) -> None:
-        """In-place subtract, i.e. `indent -= 1`"""
+        """ In-place subtract, i.e. `indent -= 1` """
         self.num = self.num - other
         if self.num < 0:
             raise ValueError("Negative indentation")
@@ -99,18 +99,18 @@ class Indent:
 
 
 class Netlister:
-    """# Abstract Base `Netlister` Class
+    """ # Abstract Base `Netlister` Class 
 
-    `Netlister` is not directly instantiable, and none of its sub-classes are intended
-    for usage outside the `netlist` package. The primary API method `netlist` is designed to
-    create, use, and drop a `Netlister` instance.
-    Once instantiated a `Netlister`'s primary API method is `netlist`.
-    This writes all content in its `src` field to destination `dest`.
-
+    `Netlister` is not directly instantiable, and none of its sub-classes are intended 
+    for usage outside the `netlist` package. The primary API method `netlist` is designed to 
+    create, use, and drop a `Netlister` instance. 
+    Once instantiated a `Netlister`'s primary API method is `netlist`. 
+    This writes all content in its `src` field to destination `dest`. 
+    
     Internal methods come in two primary flavors:
-    * `write_*` methods, which write to `self.dest`. These methods are generally format-specific.
-    * `format_*` methods, which return format-specific strings, but *do not* write to `dest`.
-    * `get_*` methods, which retrieve some internal data, e.g. extracting the type of a `Connection`.
+    * `write_*` methods, which write to `self.dest`. These methods are generally format-specific. 
+    * `format_*` methods, which return format-specific strings, but *do not* write to `dest`. 
+    * `get_*` methods, which retrieve some internal data, e.g. extracting the type of a `Connection`. 
     """
 
     def __init__(
@@ -129,8 +129,8 @@ class Netlister:
         )  # Visited ExternalModule names, checked for duplicates
 
     def netlist(self) -> None:
-        """Primary API Method.
-        Convert everything in `self.src` and write to `self.dest`."""
+        """ Primary API Method.
+        Convert everything in `self.src` and write to `self.dest`. """
 
         # Write some header commentary
         self.write_header()
@@ -144,8 +144,8 @@ class Netlister:
         # And ensure all output makes it to `self.dest`
         self.dest.flush()
 
-    def fail(self, entry: Entry, msg: str) -> None:
-        """React to a failure, depending on `self.errormode`."""
+    def handle_error(self, entry: Entry, msg: str) -> None:
+        """ React to an error, depending on `self.errormode`. """
         if self.errormode is ErrorMode.RAISE:
             raise RuntimeError(msg)
         elif self.errormode is ErrorMode.COMMENT:
@@ -156,13 +156,13 @@ class Netlister:
             raise ValueError(f"Unknown error mode {self.errormode}")
 
     def write_source_file(self, file: SourceFile) -> None:
-        """Write the content of `file` to `self.dest`."""
+        """ Write the content of `file` to `self.dest`. """
         self.write_comment(f"Source File: {file.path}")
         for entry in file.contents:
             self.write_entry(entry)
 
     def write_entry(self, entry: Entry) -> None:
-        """Write an `Entry`. Primarily dispatches across the `Entry` union-types."""
+        """ Write an `Entry`. Primarily dispatches across the `Entry` union-types. """
 
         if isinstance(entry, SubcktDef):
             return self.write_subckt_def(entry)
@@ -197,16 +197,16 @@ class Netlister:
         unsupported = (DialectChange, FunctionDef, Unknown, AhdlInclude, Library)
         # FIXME: is writing `Library` even really a thing?
         if isinstance(entry, unsupported):
-            return self.fail(entry, f"Unsupported Entry: {entry}")
+            return self.handle_error(entry, f"Unsupported Entry: {entry}")
 
-        return self.fail(entry, f"Invalid Entry: {entry}")
+        return self.handle_error(entry, f"Invalid Entry: {entry}")
 
     def write(self, s: str) -> None:
-        """Helper/wrapper, passing to `self.dest`"""
+        """ Helper/wrapper, passing to `self.dest` """
         self.dest.write(s)
 
     def writeln(self, s: str) -> None:
-        """Write `s` as a line, at our current `indent` level."""
+        """ Write `s` as a line, at our current `indent` level. """
         self.write(f"{self.indent.state}{s}\n")
 
     # @classmethod
@@ -345,10 +345,10 @@ class Netlister:
     #     raise ValueError(f"Invalid Module reference {ref}")
 
     def write_header(self) -> None:
-        """Write header commentary
-        This proves particularly important for many Spice-like formats,
-        which *always* interpret the first line of an input-file as a comment (among many other dumb things).
-        So, always write one there right off the bat."""
+        """ Write header commentary 
+        This proves particularly important for many Spice-like formats, 
+        which *always* interpret the first line of an input-file as a comment (among many other dumb things). 
+        So, always write one there right off the bat. """
 
         # FIXME!
         # if self.src.domain:
@@ -360,21 +360,21 @@ class Netlister:
         self.writeln("")
 
     def format_ident(self, ident: Ident) -> str:
-        """Format an identifier. Default just returns its string `name`."""
+        """ Format an identifier. Default just returns its string `name`. """
         return ident.name
 
     def expression_delimiters(self) -> Tuple[str, str]:
-        """Return the starting and closing delimiters for expressions."""
+        """ Return the starting and closing delimiters for expressions. """
         # Base case: single-ticks
         return ("'", "'")
 
     def format_number(self, num: Union[Int, Float, MetricNum]) -> str:
-        """Format a numeric literal."""
+        """ Format a numeric literal. """
         return str(num.val)
 
     def format_expr(self, expr: Expr) -> str:
-        """Format a mathematical Expression.
-        Primarily dispatches across the `Expr` type-union."""
+        """ Format a mathematical Expression. 
+        Primarily dispatches across the `Expr` type-union. """
 
         # Scalar literals. Return their string value.
         if isinstance(expr, (Int, Float, MetricNum)):
@@ -410,7 +410,7 @@ class Netlister:
         return rv
 
     def format_unary_op(self, op: UnaryOp) -> str:
-        """Format a unary operation ."""
+        """ Format a unary operation . """
 
         operator = self.format_unary_operator(op.tp)
         targ = self.format_expr(op.targ)
@@ -418,11 +418,11 @@ class Netlister:
         return f"{operator}{targ}"
 
     def format_unary_operator(self, tp: UnaryOperator) -> str:
-        """Format a unary operator"""
+        """ Format a unary operator """
         return tp.value
 
     def format_binary_op(self, op: BinaryOp) -> str:
-        """Format a binary operation ."""
+        """ Format a binary operation . """
 
         left = self.format_expr(op.left)
         operator = self.format_binary_operator(op.tp)
@@ -431,11 +431,11 @@ class Netlister:
         return f"{left}{operator}{right}"
 
     def format_binary_operator(self, tp: BinaryOperator) -> str:
-        """Format a binary operator"""
+        """ Format a binary operator """
         return tp.value
 
     def format_ternary_op(self, op: TernOp) -> str:
-        """Format a ternary operation."""
+        """ Format a ternary operation. """
 
         cond = self.format_expr(op.cond)
         if_true = self.format_expr(op.if_true)
@@ -444,7 +444,7 @@ class Netlister:
         return f"{cond} ? {if_true} : {if_false}"
 
     def format_function_call(self, call: Call) -> str:
-        """Format a function-call expression."""
+        """ Format a function-call expression. """
         funcname = self.format_ident(call.func)
         args = [self.format_expr(arg) for arg in call.args]
         return f'{funcname}({",".join(args)})'
@@ -455,7 +455,7 @@ class Netlister:
 
     @classmethod
     def format_bus_bit(cls, index: Union[int, str]) -> str:
-        """Format bus-bit `index`"""
+        """ Format bus-bit `index` """
         raise NotImplementedError
 
     """ 
@@ -463,61 +463,61 @@ class Netlister:
     """
 
     def write_include(self, inc: Include) -> None:
-        """Write a file-Include"""
+        """ Write a file-Include """
         raise NotImplementedError
 
     def write_use_lib(self, uselib: UseLibSection) -> None:
-        """Write a sectioned Library-usage"""
+        """ Write a sectioned Library-usage """
         raise NotImplementedError
 
     def write_library_section(self, section: LibSectionDef) -> None:
-        """Write a Library Section definition"""
+        """ Write a Library Section definition """
         raise NotImplementedError
 
     def write_model_def(self, model: ModelDef) -> None:
-        """Write a model definition"""
+        """ Write a model definition """
         raise NotImplementedError
 
     def write_model_def(self, model: ModelDef) -> None:
-        """Write a model definition"""
+        """ Write a model definition """
         raise NotImplementedError
 
     def write_statistics_block(self, stats: StatisticsBlock) -> None:
-        """Write a StatisticsBlock `stats`"""
+        """ Write a StatisticsBlock `stats` """
         raise NotImplementedError
 
     def write_param_decls(self, params: ParamDecls) -> None:
-        """Write parameter declarations"""
+        """ Write parameter declarations """
         raise NotImplementedError
 
     def write_param_decl(self, param: ParamDecl) -> None:
-        """Write a parameter declaration"""
+        """ Write a parameter declaration """
         raise NotImplementedError
 
     def write_param_val(self, param: ParamVal) -> None:
-        """Write a parameter value"""
+        """ Write a parameter value """
         raise NotImplementedError
 
     def write_comment(self, comment: str) -> None:
-        """Format and string a string comment.
-        "Line comments" are the sole supported variety, which fit within a line, and extend to the end of that line.
-        The `write_comment` method assumes responsibility for closing the line."""
+        """ Format and string a string comment. 
+        "Line comments" are the sole supported variety, which fit within a line, and extend to the end of that line. 
+        The `write_comment` method assumes responsibility for closing the line. """
         raise NotImplementedError
 
     def write_subckt_def(self, subckt: SubcktDef) -> None:
-        """Write Subckt Definition `subckt`"""
+        """ Write Subckt Definition `subckt` """
         raise NotImplementedError
 
     def write_instance(self, inst: Instance) -> None:
-        """Write Instance `inst`"""
+        """ Write Instance `inst` """
         raise NotImplementedError
 
     def write_options(self, options: Options) -> None:
-        """Write Options `options`"""
+        """ Write Options `options` """
         raise NotImplementedError
 
     def write_expr(self, expr: Expr) -> None:
-        """Write a (potentially nested) mathematical expression `expr`"""
+        """ Write a (potentially nested) mathematical expression `expr` """
         raise NotImplementedError
 
     """ 
@@ -526,5 +526,5 @@ class Netlister:
 
     @property
     def enum(self):
-        """Get our entry in the `NetlistFormat` enumeration"""
+        """ Get our entry in the `NetlistFormat` enumeration """
         raise NotImplementedError

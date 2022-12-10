@@ -4,7 +4,7 @@
 from typing import Optional, Union
 
 # Local Imports
-from ..data import *
+from ..data import * 
 from .base import DialectParser, Tokens
 
 
@@ -37,12 +37,19 @@ class SpiceDialectParser(DialectParser):
                 Tokens.OPTION: self.parse_options,
                 Tokens.INC: self.parse_include,
                 Tokens.INCLUDE: self.parse_include,
+                Tokens.LIB: self.parse_lib_statement,
+                Tokens.ENDL: self.parse_endl,
+                Tokens.PROT: self.parse_protect,
+                Tokens.PROTECT: self.parse_protect,
+                Tokens.UNPROT: self.parse_unprotect,
+                Tokens.UNPROTECT: self.parse_unprotect,
             }
             pk = self.peek()
-            for tok, func in rules.items():
-                if pk.tp == tok:
-                    return func()
-            self.fail(f"Invalid or unsupported dot-statement: {pk}")
+            if pk.tp not in rules:
+                return self.fail(f"Invalid or unsupported dot-statement: {pk}")
+            # Call the type-specific parsing function
+            type_parser = rules[pk.tp]
+            return type_parser()
 
         elif pk.tp == Tokens.IDENT:
             if pk.val.lower().startswith("x"):
@@ -50,11 +57,48 @@ class SpiceDialectParser(DialectParser):
             return self.parse_primitive()
 
         # No match - error time.
-        self.fail(f"Unexpected token to begin statement: {pk}")
+        return self.fail(f"Unexpected token to begin statement: {pk}")
+
+    def parse_lib_statement(self) -> Union[StartLibSection, UseLibSection]:
+        """
+        Parse a Spice-format `.lib` statement,
+        which sadly can mean either of
+        * (a) Start defining a `LibSection`, or
+        * (b) *Include* the content of a `LibSection`
+        The difference depends on how many fields show up after `.lib`.
+        """
+        self.expect(Tokens.LIB)
+
+        # Parse that first argument, which can be either a file-path or an identifier.
+        # Parse it to string as a file-path, which *should* keep identifiers intact.
+        first_arg = self.parse_path()
+
+        if self.peek().tp == Tokens.IDENT:
+            # Three-argument form. Create a `UseLib`.
+            section = self.parse_ident()
+            self.expect(Tokens.NEWLINE)
+            return UseLibSection(path=first_arg, section=section)
+
+        # Two-argument form. Create a `StartLibSection`
+        self.expect(Tokens.NEWLINE)
+        return StartLibSection(Ident(first_arg))
 
     def parse_include(self) -> Include:
         """Parse an Include Statement"""
         self.expect(Tokens.INC, Tokens.INCLUDE)
+        path = self.parse_path()
+        self.expect(Tokens.NEWLINE)
+        return Include(path)
+
+    def parse_endl(self) -> EndLibSection:
+        """Parse an end-lib-section Statement"""
+        self.expect(Tokens.ENDL)
+        name = self.parse_ident()  # FIXME: is this optional?
+        self.expect(Tokens.NEWLINE)
+        return EndLibSection(name)
+
+    def parse_path(self) -> str:
+        """Parse a file-system path, either quote-delimited or not"""
         if self.peek().tp in (Tokens.TICK, Tokens.DUBQUOTE):
             path = self.parse_quote_string()
         else:
@@ -64,14 +108,34 @@ class SpiceDialectParser(DialectParser):
                 Tokens.IDENT, Tokens.DOT, Tokens.SLASH, Tokens.BACKSLASH
             ):
                 path += self.cur.val
-        self.expect(Tokens.NEWLINE)
-        return Include(path)
+        return path
 
-    def parse_param_statement(self) -> ParamDecls:
-        """Parse a Parameter-Declaration Statement"""
+    def parse_param_statement(self) -> Union[ParamDecls, FunctionDef]:
+        """
+        Parse a `.param` statement, which defines one of:
+        * (a) A set of parameter-declaration `ParamDecl`s, or
+        * (b) A *single* "parameter function" `FunctionDef`.
+
+        Netlist syntax mixing the two, e.g.
+        ```
+        .param a=5 b=6 func(x,y) 'x*a +y*b'
+        ```
+        is not supported.
+        """
         self.expect(Tokens.PARAM)
-        vals = self.parse_param_declarations()  # NEWLINE is captured inside
-        return ParamDecls(vals)
+
+        # Parse the first key-name, so we can see what follows
+        _ = self.parse_ident()
+        if self.nxt and self.nxt.tp == Tokens.LPAREN:
+            # This is a function definition.
+            returnfunc = self.parse_function_def
+        else:  # Otherwise, parse a set of parameter-declarations
+            returnfunc = lambda: ParamDecls(self.parse_param_declarations())
+
+        # Either way, push the first ident back on before calling `returnfunc`
+        self.rewind()
+        # And call the parsing function for either the `ParamDecls` or `FunctionDef`
+        return returnfunc()
 
     def parse_model(self) -> Union[ModelDef, ModelVariant]:
         """Parse SPICE .model Statements"""
@@ -82,38 +146,82 @@ class SpiceDialectParser(DialectParser):
         if self.match(Tokens.MODEL_VARIANT):  # `model.variant` ModelVariant form
             spl = self.cur.val.split(".")
             if len(spl) != 2:
-                self.fail()
+                self.fail(f"Invalid model-variant name: {spl.join('.')}")
             mname = Ident(spl[0])
             variant = Ident(str(spl[1]))
-            self.expect(Tokens.IDENT)
-            mtype = Ident(self.cur.val)
+            mtype = self.parse_ident()
+            partial = lambda args_and_params: ModelVariant(
+                mname, variant, mtype, *args_and_params
+            )
 
-            args = self.parse_ident_list(_endargs_startkwargs)
-            # If we landed on a key-value param key, rewind it
-            if self.nxt and self.nxt.tp == Tokens.EQUALS:
-                self.rewind()
-                args.pop()
-            params = self.parse_param_declarations()
-            return ModelVariant(mname, variant, mtype, args, params)
+        else:  # Single ModelDef
+            mname = self.parse_ident()
+            mtype = self.parse_ident()
+            partial = lambda args_and_params: ModelDef(
+                mname, mtype, *args_and_params
+            )
 
-        # Single ModelDef
-        self.expect(Tokens.IDENT)
-        mname = Ident(self.cur.val)
-        self.expect(Tokens.IDENT)
-        mtype = Ident(self.cur.val)
+        # Get to some work shared among the two: parsing positional args and by-keyword params
         args = self.parse_ident_list(_endargs_startkwargs)
+
         # If we landed on a key-value param key, rewind it
         if self.nxt and self.nxt.tp == Tokens.EQUALS:
             self.rewind()
             args.pop()
-        params = self.parse_param_declarations()
-        return ModelDef(mname, mtype, args, params)
 
-    def parse_options(self):
+        # Model parameters (apparently) get optional parentheses around them.
+        if self.match(Tokens.LPAREN):
+            term = lambda s: s.nxt is None or s.match(Tokens.RPAREN)
+            params = self.parse_list(
+                self.parse_param_declaration, term=term, MAXN=100_000
+            )
+            self.expect(Tokens.NEWLINE)
+        else:  # NEWLINE delimited parameter-declarations
+            params = self.parse_param_declarations()
+
+        # Call that closure we created, making either a `ModelDef` or `ModelVariant`
+        return partial((args, params))
+
+    def parse_options(self) -> Options:
         self.match(Tokens.OPTION)
-        vals = self.parse_param_values()
+        vals = self.parse_option_values()
         self.match(Tokens.NEWLINE)
         return Options(name=None, vals=vals)
+
+    def parse_function_def(self) -> FunctionDef:
+        """Yes, Spice netlists (or at least *some* versions thereof) do have function definitions!
+        Sort of. They are more like Python's lambda-functions in being limited to a single-line, single-expression.
+
+        Syntax: `funcname (argname1, argname2) 'return_expr'`
+
+        While arguments are stored as `TypedArg`s, all of their `tp` fields are set to `ArgType.UNKNOWN`.
+        """
+        name = self.parse_ident()
+        self.expect(Tokens.LPAREN)
+        # Parse arguments
+        args = []
+        MAX_ARGS = 100  # Set a "time-out" so that we don't get stuck here.
+        for i in range(MAX_ARGS, -1, -1):
+            if self.match(Tokens.RPAREN):
+                break  # Note we can have zero-argument cases, I guess.
+            a = TypedArg(tp=ArgType.UNKNOWN, name=self.parse_ident())
+            args.append(a)
+            if self.match(Tokens.RPAREN):
+                break
+            self.expect(Tokens.COMMA)
+        if i <= 0:  # Check the time-out
+            self.fail(f"Unable to parse argument list for spice-function {name.name}")
+
+        self.expect(Tokens.EQUALS)
+        self.expect(Tokens.TICK)
+        # Parse the return-expression
+        ret = Return(self.parse_expr())
+        self.expect(Tokens.TICK)
+        self.expect(Tokens.NEWLINE)
+
+        return FunctionDef(
+            name=name, rtype=ArgType.UNKNOWN, args=args, stmts=[ret]
+        )
 
     def are_stars_comments_now(self) -> bool:
         from .base import ParserState

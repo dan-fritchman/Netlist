@@ -79,16 +79,21 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
             Tokens.LIBRARY: self.parse_start_lib,
             Tokens.SECTION: self.parse_start_section,
             Tokens.ENDSECTION: self.parse_end_section,
+            Tokens.ENDLIBRARY: self.parse_end_lib,
             Tokens.INCLUDE: self.parse_include,
             Tokens.REAL: self.parse_function_def,
+            Tokens.PROT: self.parse_protect,
+            Tokens.PROTECT: self.parse_protect,
+            Tokens.UNPROT: self.parse_unprotect,
+            Tokens.UNPROTECT: self.parse_unprotect,
             Tokens.IDENT: self.parse_named,  # Catch-all for any non-keyword identifier
         }
-        for tok, func in rules.items():
-            if pk.tp == tok:
-                return func()
-
-        # No match - error time.
-        self.fail()
+        if pk.tp not in rules:
+            # No match - error time.
+            return self.fail(f"Unexpected token to begin statement: {pk}")
+        # Call the type-specific parsing function
+        type_parser = rules[pk.tp]
+        return type_parser()
 
     def parse_named(self):
         """Parse an identifier-named statement.
@@ -241,12 +246,21 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         # Stars are comments only to begin lines, and at the beginning of a file. (We think?)
         return not self.lex.lexed_nonwhite_on_this_line
 
-    def parse_start_lib(self):
+    def parse_start_lib(self) -> StartLib:
         self.expect(Tokens.LIBRARY)
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
         self.expect(Tokens.NEWLINE)
         return StartLib(name)
+
+    def parse_end_lib(self) -> EndLib:
+        self.expect(Tokens.ENDLIBRARY)
+        if self.match(Tokens.NEWLINE):
+            # No name specified
+            return EndLib(name=None)
+        name = self.parse_ident()
+        self.expect(Tokens.NEWLINE)
+        return EndLib(name)
 
     def parse_start_section(self):
         self.expect(Tokens.SECTION)
@@ -270,7 +284,7 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         self.expect(Tokens.IDENT)
         name = Ident(self.cur.val)
         self.expect(Tokens.OPTIONS)
-        vals = self.parse_param_values()
+        vals = self.parse_option_values()
         return Options(name=name, vals=vals)
 
     def parse_include(self) -> Union[Include, UseLibSection]:
@@ -305,18 +319,16 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         MAX_ARGS = 100  # Set a "time-out" so that we don't get stuck here.
         for i in range(MAX_ARGS, -1, -1):
             if self.match(Tokens.RPAREN):
-                break
-            self.expect(
-                Tokens.REAL
-            )  # Argument type. FIXME: support more types than REAL
-            self.expect(Tokens.IDENT)
-            a = TypedArg(tp=Ident("real"), name=Ident(self.cur.val))
+                break  # Note we can have zero-argument cases, I guess.
+            # Argument type. FIXME: support more types than REAL
+            self.expect(Tokens.REAL)
+            a = TypedArg(tp=ArgType.REAL, name=self.parse_ident())
             args.append(a)
             if self.match(Tokens.RPAREN):
                 break
             self.expect(Tokens.COMMA)
         if i <= 0:  # Check the time-out
-            self.fail()
+            self.fail(f"Unable to parse argument list for spectre-function {name.name}")
 
         self.expect(Tokens.LBRACKET)
         self.expect(Tokens.NEWLINE)
@@ -330,4 +342,4 @@ class SpectreDialectParser(SpectreMixin, DialectParser):
         self.expect(Tokens.RBRACKET)
         self.expect(Tokens.NEWLINE)
 
-        return FunctionDef(name=name, rtype=Ident("real"), args=args, stmts=[ret])
+        return FunctionDef(name=name, rtype=ArgType.REAL, args=args, stmts=[ret])

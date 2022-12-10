@@ -36,36 +36,36 @@ heavily re-using a central `SpiceNetlister` class, but requiring simulator-speci
 import sys
 from enum import Enum
 from warnings import warn
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, get_args
 
 # Local Imports
 from ..data import *
-from .base import Netlister, ErrorMode
+from .base import Netlister
 
 
 class SpiceNetlister(Netlister):
     """
-    # "Generic" Spice Netlister
+    # "Generic" Spice Netlister 
     and base-class for Spice dialects.
 
-    Performs nearly all data-model traversal,
-    offloading syntax-specifics to dialect-specific sub-classes.
+    Performs nearly all data-model traversal, 
+    offloading syntax-specifics to dialect-specific sub-classes. 
 
-    Attempts to write only the "generic" subset of Spice-content,
-    in the "most generic" methods as perceived by the authors.
-    This may not work for *any* particular simulator; see the simulator-specific dialects below,
-    and the module-level commentary above for more on why.
+    Attempts to write only the "generic" subset of Spice-content, 
+    in the "most generic" methods as perceived by the authors. 
+    This may not work for *any* particular simulator; see the simulator-specific dialects below, 
+    and the module-level commentary above for more on why. 
     """
 
     @property
     def enum(self):
-        """Get our entry in the `NetlistFormat` enumeration"""
+        """ Get our entry in the `NetlistFormat` enumeration """
         from . import NetlistFormat
 
         return NetlistFormat.SPICE
 
     def write_subckt_def(self, module: SubcktDef) -> None:
-        """Write the `SUBCKT` definition for `Module` `module`."""
+        """ Write the `SUBCKT` definition for `Module` `module`."""
 
         # Create the module name
         module_name = self.format_ident(module.name)
@@ -104,14 +104,14 @@ class SpiceNetlister(Netlister):
         self.write(".ENDS\n\n")
 
     def write_port_declarations(self, module: SubcktDef) -> None:
-        """Write the port declarations for Module `module`."""
+        """ Write the port declarations for Module `module`. """
         self.write("+ ")
         for port in module.ports:
             self.write(self.format_ident(port) + " ")
         self.write("\n")
 
     def write_module_params(self, module: SubcktDef) -> None:
-        """Write the parameter declarations for Module `module`.
+        """ Write the parameter declarations for Module `module`. 
         Parameter declaration format: `name1=val1 name2=val2 name3=val3 \n`"""
         self.write("+ ")
         for name, pparam in module.parameters.items():
@@ -119,7 +119,7 @@ class SpiceNetlister(Netlister):
         self.write("\n")
 
     def write_subckt_instance(self, pinst: Instance) -> None:
-        """Write sub-circuit-instance `pinst` of `rmodule`."""
+        """ Write sub-circuit-instance `pinst` of `rmodule`. """
 
         # Write the instance name
         self.write(self.format_ident(pinst.name) + " \n")
@@ -137,9 +137,9 @@ class SpiceNetlister(Netlister):
         self.write("\n")
 
     def write_primitive_instance(self, pinst: Instance) -> None:
-        """Write primitive-instance `pinst` of `rmodule`.
-        Note spice's primitive instances often differn syntactically from sub-circuit instances,
-        in that they can have positional (only) parameters."""
+        """ Write primitive-instance `pinst` of `rmodule`. 
+        Note spice's primitive instances often differn syntactically from sub-circuit instances, 
+        in that they can have positional (only) parameters. """
 
         # Write the instance name
         self.write(self.format_ident(pinst.name) + " \n")
@@ -150,14 +150,16 @@ class SpiceNetlister(Netlister):
             # is a connection, and which is a positional parameter-value.
             # This matters in some contexts, as parameters can be expressions,
             # which may need some expression-evaluation syntax.
-            # For now, if the arguments are not scalars (identifiers or numbers), fail.
+            # For now, write anything that looks like a compound expression as a compound expression. 
             if isinstance(arg, Ident):
                 self.write(self.format_ident(arg) + " ")
             elif isinstance(arg, (Int, Float, MetricNum)):
                 self.write(self.format_number(arg) + " ")
             else:
-                msg = f"Primitive instance {pinst.name} has non-scalar argument {arg}"
-                raise RuntimeError(msg)
+                self.write(self.format_expr(arg) + " ")
+            # else:
+            #     msg = f"Primitive instance {pinst.name} has non-scalar argument {arg}"
+            #     self.handle_error(msg)
         self.write(" \n")
 
         self.write("+ ")
@@ -169,7 +171,7 @@ class SpiceNetlister(Netlister):
         self.write("\n")
 
     def write_instance_conns(self, pinst: Instance) -> None:
-        """Write the port-connections for Instance `pinst`"""
+        """ Write the port-connections for Instance `pinst` """
 
         # Write a quick comment for port-less modules
         if not len(pinst.conns):
@@ -187,15 +189,15 @@ class SpiceNetlister(Netlister):
         self.write("\n")
 
     def write_instance_params(self, pvals: List[ParamVal]) -> None:
-        """
-        Format and write the parameter-values in dictionary `pvals`.
-
+        """ 
+        Format and write the parameter-values in dictionary `pvals`. 
+        
         Parameter-values format:
         ```
-        XNAME
-        + <ports>
-        + <subckt-name>
-        + name1=val1 name2=val2 name3=val3
+        XNAME 
+        + <ports> 
+        + <subckt-name> 
+        + name1=val1 name2=val2 name3=val3 
         """
 
         self.write("+ ")
@@ -250,12 +252,12 @@ class SpiceNetlister(Netlister):
 
     @classmethod
     def format_bus_bit(cls, index: Union[int, str]) -> str:
-        """Format-specific string-representation of a bus bit-index"""
+        """ Format-specific string-representation of a bus bit-index """
         # Spectre netlisting uses an underscore prefix, e.g. `bus_0`
         return "_" + str(index)
 
     def write_param_decl(self, param: ParamDecl) -> str:
-        """Format a parameter declaration"""
+        """ Format a parameter declaration """
 
         if param.distr is not None:
             msg = f"Unsupported `distr` for parameter {param.name} will be ignored"
@@ -275,34 +277,18 @@ class SpiceNetlister(Netlister):
         self.write(f"{self.format_ident(param.name)}={default}")
 
     def write_param_val(self, param: ParamVal) -> None:
-        """Write a parameter value"""
+        """ Write a parameter value """
 
         name = self.format_ident(param.name)
         val = self.format_expr(param.val)
         self.write(f"{name}={val}")
 
     def write_comment(self, comment: str) -> None:
-        """While dialects vary, the *generic* Spice-comment begins with the asterisk."""
+        """ While dialects vary, the *generic* Spice-comment begins with the asterisk. """
         self.write(f"* {comment}\n")
 
-    def format_expression(self, expr: str) -> str:
-        """Format a string such that the target format interprets it as an expression.
-        Example:
-        ```
-        * Parameter Declarations
-        .param v0=1 v1='v0+1' * <= Here
-        * Instance with the same name
-        v0 1 0 dc='v0+2*v1' * <= And here
-        ```
-        Note the latter case includes the star character (`*`) for multiplication,
-        where in many other contexts it is treated as the comment-character.
-        """
-        # The base class does what (we think) is the most common practice:
-        # wrapping expressions in single-tick quotes.
-        return f"'{expr}'"
-
     def write_options(self, options: Options) -> None:
-        """Write Options `options`"""
+        """ Write Options `options` """
         if options.name is not None:
             msg = f"Warning invalid `name`d Options"
             warn(msg)
@@ -313,12 +299,13 @@ class SpiceNetlister(Netlister):
         self.write(".option \n")
         for option in options.vals:
             self.write("+ ")
+            # FIXME: add the cases included in `OptionVal` but not `ParamVal`, notably quoted string-paths
             self.write_param_val(option)
             self.write(" \n")
         self.write("\n")
 
     def write_statistics_block(self, stats: StatisticsBlock) -> None:
-        """Write a StatisticsBlock `stats`"""
+        """ Write a StatisticsBlock `stats` """
 
         # Not supported currently, maybe ever, by any of the supported spice-formats.
         # Write as a comment. FIXME: add the option to bail
@@ -330,7 +317,7 @@ class SpiceNetlister(Netlister):
         self.write("\n")
 
     def write_param_decls(self, params: ParamDecls) -> None:
-        """Write parameter declarations"""
+        """ Write parameter declarations """
         self.write(".param \n")
         for p in params.params:
             self.write("+ ")
@@ -339,14 +326,14 @@ class SpiceNetlister(Netlister):
         self.write("\n")
 
     def write_model_family(self, mfam: ModelFamily) -> None:
-        """Write a model family"""
+        """ Write a model family """
         # Just requires writing each variant.
         # They will be output with `modelname.variant` names, as most SPICE formats want.
         for variant in mfam.variants:
             self.write_model_variant(variant)
 
     def write_model_variant(self, mvar: ModelVariant) -> None:
-        """Write a model variant"""
+        """ Write a model variant """
 
         # This just convertes to a `ModelDef` with a dot-separated name, and running `write_model_def`.
         model = ModelDef(
@@ -358,7 +345,7 @@ class SpiceNetlister(Netlister):
         return self.write_model_def(model)
 
     def write_model_def(self, model: ModelDef) -> None:
-        """Write a model definition"""
+        """ Write a model definition """
 
         mname = self.format_ident(model.name)
         mtype = self.format_ident(model.mtype)
@@ -377,19 +364,19 @@ class SpiceNetlister(Netlister):
         self.write("\n")  # Ending blank-line
 
     def write_library_section(self, section: LibSectionDef) -> None:
-        """Write a Library Section definition"""
+        """ Write a Library Section definition """
         self.write(f".lib {self.format_ident(section.name)}\n")
         for entry in section.entries:
             self.write_entry(entry)
         self.write(f".endl {self.format_ident(section.name)}\n\n")
 
     def write_include(self, inc: Include) -> None:
-        """Write a file-Include"""
+        """ Write a file-Include """
         # Format: `.include {path} `
         self.write(f".include {str(inc.path)}\n\n")
 
     def write_use_lib(self, uselib: UseLibSection) -> None:
-        """Write a sectioned Library-usage"""
+        """ Write a sectioned Library-usage """
         # Format: `.lib {path} {section}`
         # Note quotes here are interpreted as part of `section`, and generally must be avoided.
         self.write(f".lib {str(uselib.path)} {self.format_ident(uselib.section)} \n\n")
@@ -397,33 +384,33 @@ class SpiceNetlister(Netlister):
 
 class HspiceNetlister(SpiceNetlister):
     """
-    # Hspice-Format Netlister
-
-    Other than its `NetlistFormat` enumeration, `HspiceNetlister` is identical to the base `SpiceNetlister`.
+    # Hspice-Format Netlister 
+    
+    Other than its `NetlistFormat` enumeration, `HspiceNetlister` is identical to the base `SpiceNetlister`. 
     """
 
     @property
     def enum(self):
-        """Get our entry in the `NetlistFormat` enumeration"""
+        """ Get our entry in the `NetlistFormat` enumeration """
         from . import NetlistFormat
 
         return NetlistFormat.HSPICE
 
 
 class XyceNetlister(SpiceNetlister):
-    """Xyce-Format Netlister"""
+    """ Xyce-Format Netlister """
 
     @property
     def enum(self):
-        """Get our entry in the `NetlistFormat` enumeration"""
+        """ Get our entry in the `NetlistFormat` enumeration """
         from . import NetlistFormat
 
         return NetlistFormat.XYCE
 
     def write_module_params(self, params: List[ParamDecl]) -> None:
-        """Write the parameter declarations for Module `module`.
+        """ Write the parameter declarations for Module `module`. 
         Parameter declaration format:
-        .SUBCKT <name> <ports>
+        .SUBCKT <name> <ports> 
         + PARAMS: name1=val1 name2=val2 name3=val3 \n
         """
         self.write("+ PARAMS: ")  # <= Xyce-specific
@@ -433,14 +420,14 @@ class XyceNetlister(SpiceNetlister):
         self.write("\n")
 
     def write_instance_params(self, pvals: List[ParamVal]) -> None:
-        """Write the parameter-values for Instance `pinst`.
+        """ Write the parameter-values for Instance `pinst`. 
 
         Parameter-values format:
         ```
-        XNAME
-        + <ports>
-        + <subckt-name>
-        + PARAMS: name1=val1 name2=val2 name3=val3
+        XNAME 
+        + <ports> 
+        + <subckt-name> 
+        + PARAMS: name1=val1 name2=val2 name3=val3 
         """
         self.write("+ ")
 
@@ -456,26 +443,26 @@ class XyceNetlister(SpiceNetlister):
         self.write("\n")
 
     def write_comment(self, comment: str) -> None:
-        """Xyce comments *kinda* support the Spice-typical `*` charater,
-        but *only* as the first character in a line.
-        Any mid-line-starting comments must use `;` instead.
-        So, just use it all the time."""
+        """ Xyce comments *kinda* support the Spice-typical `*` charater, 
+        but *only* as the first character in a line. 
+        Any mid-line-starting comments must use `;` instead. 
+        So, just use it all the time. """
         self.write(f"; {comment}\n")
 
     def expression_delimiters(self) -> Tuple[str, str]:
-        """Return the starting and closing delimiters for expressions."""
+        """ Return the starting and closing delimiters for expressions. """
         return ("{", "}")
 
     def write_options(self, options: Options) -> None:
-        """Write Options `options`
+        """ Write Options `options` 
+        
+        Xyce differs from many Spice-class simulators 
+        in categorizing options, and requiring that users known their category. 
+        Example categories include settings for the netlist parser, 
+        device models, and many, many solver configurations. 
 
-        Xyce differs from many Spice-class simulators
-        in categorizing options, and requiring that users known their category.
-        Example categories include settings for the netlist parser,
-        device models, and many, many solver configurations.
-
-        The `netlist` AST also does not include this information,
-        so valid options per-category are defined here.
+        The `netlist` AST also does not include this information, 
+        so valid options per-category are defined here. 
         """
 
         if options.name is not None:
@@ -485,7 +472,7 @@ class XyceNetlister(SpiceNetlister):
             self.write("\n")
 
         class Category(Enum):
-            """Xyce-specific categories"""
+            """ Xyce-specific categories """
 
             DEVICE = "device"
             PARSER = "parser"
@@ -502,7 +489,8 @@ class XyceNetlister(SpiceNetlister):
             name = self.format_ident(option.name)
             if name not in categories:
                 msg = f"Unknown Xyce option `{name}`, cannot find `.options` category"
-                raise RuntimeError(msg)
+                self.handle_error(option, msg)
+                continue
             category = categories[name].value
             if category not in by_category:
                 by_category[category] = []
@@ -513,34 +501,35 @@ class XyceNetlister(SpiceNetlister):
             self.write(f".options {category_name} \n")
             for option in category_list:
                 self.write("+ ")
+                # FIXME: add the cases included in `OptionVal` but not `ParamVal`, notably quoted string-paths
                 self.write_param_val(option)
                 self.write(" \n")
             self.write("\n")
 
 
 class NgspiceNetlister(SpiceNetlister):
-    """FIXME: Ngspice-Format Netlister"""
+    """ FIXME: Ngspice-Format Netlister """
 
     def __init__(self, *_, **__):
         raise NotImplementedError
 
     @property
     def enum(self):
-        """Get our entry in the `NetlistFormat` enumeration"""
+        """ Get our entry in the `NetlistFormat` enumeration """
         from . import NetlistFormat
 
         return NetlistFormat.NGSPICE
 
 
 class CdlNetlister(SpiceNetlister):
-    """FIXME: CDL-Format Netlister"""
+    """ FIXME: CDL-Format Netlister """
 
     def __init__(self, *_, **__):
         raise NotImplementedError
 
     @property
     def enum(self):
-        """Get our entry in the `NetlistFormat` enumeration"""
+        """ Get our entry in the `NetlistFormat` enumeration """
         from . import NetlistFormat
 
         return NetlistFormat.CDL

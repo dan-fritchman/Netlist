@@ -14,14 +14,17 @@ from netlist import (
     parse_files,
     parse_str,
     netlist as write_netlist,
+    ParseOptions,
     Program,
     SourceFile,
     ParamDecl,
+    ModelDef,
     ModelVariant,
     ModelFamily,
     BinaryOperator,
     UnaryOperator,
     Options,
+    Option,
     ParamVal,
     Ident,
     MetricNum,
@@ -36,6 +39,8 @@ from netlist import (
     UnaryOp,
     Call,
     Ref,
+    StartProtectedSection,
+    EndProtectedSection,
 )
 
 
@@ -512,10 +517,9 @@ def test_write2():
                     Options(
                         name=None,
                         vals=[
-                            ParamVal(
-                                name=Ident(name="scale", source_info=None),
-                                val=MetricNum(val="1.0u", source_info=None),
-                                source_info=None,
+                            Option(
+                                name=Ident(name="scale"),
+                                val=MetricNum(val="1.0u"),
                             )
                         ],
                         source_info=SourceInfo(
@@ -527,6 +531,155 @@ def test_write2():
         ]
     )
     write_netlist(src=src, dest=StringIO())
+
+
+def test_protection():
+    """Test the `protect` / `unprotect` encryption features"""
+    from netlist import SpectreDialectParser, SpectreSpiceDialectParser
+
+    txt = ".protect \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == StartProtectedSection()
+
+    txt = ".prot \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == StartProtectedSection()
+
+    txt = ".unprotect \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == EndProtectedSection()
+
+    txt = ".unprot \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == EndProtectedSection()
+
+    txt = "protect \n"
+    p = SpectreDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == StartProtectedSection()
+
+    txt = "prot \n"
+    p = SpectreDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == StartProtectedSection()
+
+    txt = "unprotect \n"
+    p = SpectreDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == EndProtectedSection()
+
+    txt = "unprot \n"
+    p = SpectreDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+    assert i == EndProtectedSection()
+
+
+def test_names_including_keywords():
+    """Test parsing objects whose names include keywords, such as `my_favorite_subckt`."""
+    from netlist import SpectreSpiceDialectParser, Ident, ParamDecls, ParamDecl, Int
+
+    txt = ".param my_favorite_model = model_that_works_best \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    i = p.parse(p.parse_statement)
+
+    assert i == ParamDecls(
+        params=[
+            ParamDecl(
+                name=Ident(name="my_favorite_model"),
+                default=Ref(ident=Ident(name="model_that_works_best")),
+                distr=None,
+            )
+        ],
+    )
+
+
+def test_model_with_parens():
+    from netlist import SpectreSpiceDialectParser
+
+    txt = ".model mymodel mtype arg1 arg2 arg3 (key1=val1 key2=val2) \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    m = p.parse(p.parse_statement)
+
+    golden = ModelDef(
+        name=Ident(name="mymodel"),
+        mtype=Ident(name="mtype"),
+        args=[
+            Ident(name="arg1"),
+            Ident(name="arg2"),
+            Ident(name="arg3"),
+        ],
+        params=[
+            ParamDecl(
+                name=Ident(name="key1"),
+                default=Ref(ident=Ident(name="val1")),
+                distr=None,
+            ),
+            ParamDecl(
+                name=Ident(name="key2"),
+                default=Ref(ident=Ident(name="val2")),
+                distr=None,
+            ),
+        ],
+    )
+    assert m == golden
+
+    # Run the same thing without the parens, check we get the same result
+    txt = ".model mymodel mtype arg1 arg2 arg3 key1=val1 key2=val2 \n"
+    p = SpectreSpiceDialectParser.from_str(txt)
+    m = p.parse(p.parse_statement)
+    assert m == golden
+
+
+def test_spice_function_def():
+    """Test parsing a SPICE-syntax function-definition"""
+    from netlist import SpectreSpiceDialectParser
+    from netlist.data import (
+        Ident,
+        FunctionDef,
+        ArgType,
+        TypedArg,
+        Return,
+        BinaryOp,
+        TernOp,
+    )
+
+    txt = ".param f1(p1, p2) = 'p1 > p2 ? a : b' \n"
+
+    p = SpectreSpiceDialectParser.from_str(txt)
+    m = p.parse(p.parse_statement)
+
+    assert isinstance(m, FunctionDef)
+    assert m == FunctionDef(
+        name=Ident(name="f1"),
+        rtype=ArgType.UNKNOWN,
+        args=[
+            TypedArg(
+                tp=ArgType.UNKNOWN,
+                name=Ident(name="p1"),
+            ),
+            TypedArg(
+                tp=ArgType.UNKNOWN,
+                name=Ident(name="p2"),
+            ),
+        ],
+        stmts=[
+            Return(
+                val=BinaryOp(
+                    tp=BinaryOperator.GT,
+                    left=Ref(ident=Ident(name="p1"), resolved=None),
+                    right=TernOp(
+                        cond=Ref(ident=Ident(name="p2"), resolved=None),
+                        if_true=Ref(ident=Ident(name="a"), resolved=None),
+                        if_false=Ref(ident=Ident(name="b"), resolved=None),
+                    ),
+                ),
+            )
+        ],
+    )
 
 
 def test_nested_subckt_def():
@@ -551,3 +704,28 @@ def test_nested_subckt_def():
     assert isinstance(scope, Scope)
     assert get_external_refs(scope) == []
     assert not has_external_refs(scope)
+
+
+def test_spectre_multiply_starting_continuation():
+    """Test the case of a multiply starting a continuation-line
+    This can prove confusing to parsing, as the state of whether "*" means "multiply" or "comment"
+    changes depending on whether it occurs at the start of a new line."""
+
+    # Spectre format
+    txt = dedent(
+        """
+        r1 ( p n ) resistor r=5
+        + * 10
+    """
+    )
+    parse_str(txt, options=ParseOptions(dialect=NetlistDialects.SPECTRE))
+
+    # Spice format
+    txt = dedent(
+        """
+        r1  p n  r=5
+        + * 10
+    """
+    )
+    parse_str(txt, options=ParseOptions(dialect=NetlistDialects.SPECTRE_SPICE))
+    parse_str(txt, options=ParseOptions(dialect=NetlistDialects.NGSPICE))
